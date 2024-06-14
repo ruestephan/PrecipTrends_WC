@@ -25,6 +25,42 @@ os.getcwd()
 data_path = '/mnt/share/scratch/rs1155/data/CMIP6/output_data/'
 plot_path = '/mnt/share/scratch/rs1155/plots/model_individuals/'
 
+# open model_mean for precipitation change:
+mmean_output_path = '/mnt/share/scratch/rs1155/data/CMIP6/model_means/'
+modelmean = xr.open_dataset(mmean_output_path + 'mean_combined.nc')
+
+def calc_vardiff(data, var):
+    """
+    calculates the difference between period 2075-2100 and 2000-2025
+    """
+    
+    #data = sdelta_ds
+    #var = 'pr'
+    
+    var20002025 = data[var].sel(time=slice('2000', '2025')).mean(dim='time')
+    var20752100 = data[var].sel(time=slice('2075', '2100')).mean(dim='time')
+       
+    vardiff21002025 = var20752100-var20002025
+    
+    #vardiff21002025.abs() >= var20002025*0.1
+    
+    return vardiff21002025
+
+def calc_vardiff_season(data, var):
+    """
+    calculates the difference between period 2075-2100 and 2000-2025
+    """
+    svar20002025 = data[var].sel(time=slice('2000', '2025')).groupby('time.season').mean(dim='time')
+    svar20752100 = data[var].sel(time=slice('2075', '2100')).groupby('time.season').mean(dim='time')
+   
+    svardiff21002025 = svar20752100-svar20002025
+    
+    
+    return svardiff21002025
+
+yearly_modelmean_dpr = calc_vardiff(data = modelmean, var='pr')
+season_modelmean_dpr = calc_vardiff_season(data = modelmean, var='pr')
+
 # Set several styles for plotting:
 sns.set_style('ticks')
 plt.rcParams['font.family'] = 'DejaVu Sans'
@@ -47,18 +83,12 @@ pal_Greens_r = mpl.colormaps.get_cmap('Greens_r')
 pal_Greens_r.set_bad(color='lightgray')
 pal_Reds_r = mpl.colormaps.get_cmap('Reds_r')  
 pal_Reds_r.set_bad(color='lightgray')
-colors_highest_sim2 = ['forestgreen', 'skyblue', 'darkgoldenrod']
-cmap_highest_sim2 = ListedColormap(colors_highest_sim2)
-cmap_highest_sim2.set_bad('lightgray')
-colors_highest_sim = ['forestgreen', 'skyblue', 'darkgoldenrod', 'black']
+colors_highest_sim = ['forestgreen', 'skyblue', 'darkgoldenrod']
 cmap_highest_sim = ListedColormap(colors_highest_sim)
 cmap_highest_sim.set_bad('lightgray')
-colors_highest_sim_Pmask = ['forestgreen', 'steelblue', 'darkgoldenrod', 'black', 'lightgreen', 'skyblue','wheat', 'darkgray'] 
+colors_highest_sim_Pmask = ['forestgreen', 'steelblue', 'darkgoldenrod', 'lightgreen', 'skyblue','wheat'] 
 cmap_highest_sim_Pmask = ListedColormap(colors_highest_sim_Pmask)
 cmap_highest_sim_Pmask.set_bad('lightgray')
-colors_highest_sim_Pmask2 = ['forestgreen', 'steelblue', 'darkgoldenrod', 'lightgreen', 'skyblue','wheat'] 
-cmap_highest_sim_Pmask2 = ListedColormap(colors_highest_sim_Pmask2)
-cmap_highest_sim_Pmask2.set_bad('lightgray')
 
 
 
@@ -184,6 +214,7 @@ def ratio1_index(arr1, arr2, arr3, threshold=0.1):
                          np.where(closest_to_1 == arr2_masked, 2, 3)).astype(float)
     
     
+    ''' Do that with the model agreement
     #Analyse whether the highest similarity too close to the 2nd highest similarity:
     # 1. get the second closest to 1:
     second_diff = np.where(diff1 == min_diff, np.minimum(diff2, diff3),
@@ -194,7 +225,7 @@ def ratio1_index(arr1, arr2, arr3, threshold=0.1):
     # 3. When this ratio is lower than 50 %, meaning that the 2nd closest to 1 needs to at least deviate with 50 % from the first --> unclear result:
     unclear = ratio < threshold
     index_arr[unclear] = 4
-    
+    '''
     
     # Set NaN values back to NaN
     index_arr[mask_arr1] = np.nan
@@ -264,15 +295,33 @@ files_in_directory = os.listdir(data_path)
 combined_files = [file for file in files_in_directory if 'combined' in file]
 model_names = [filename.split('_combined.nc')[0] for filename in combined_files]    
 
+# Get masks: 
+path_masks = '/mnt/share/scratch/rs1155/data/CMIP6/'
+yearly_precip_threshold = xr.open_dataset(path_masks + 'YearlyPrecip_Mask.nc')
+yearly_change_greater = xr.open_dataset(path_masks + 'YearlyPrecipChange_Mask.nc')
+seasons_change_greater = xr.open_dataset(path_masks + 'SeasonsPrecip_Mask.nc')
+
+
 all_models_delta = []
 all_models_sdelta = []
 
 for model_name in model_names:
     
-    #model_name = model_names[0]
+    #model_name = model_names[4]
     
     combined = xr.open_dataset(data_path + model_name + '_combined.nc')
     combined = combined.sel(time=slice('2000', '2100'))
+    
+
+    # Mask out areas with too little total precipitation and to little change in precipitation:
+    #combined['pr'] = combined['pr'].where(yearly_precip_threshold['pr'] & yearly_change_greater['pr'])
+    #combined['evspsbl'] = combined['evspsbl'].where(yearly_precip_threshold['pr'] & yearly_change_greater['pr'])
+    #combined['mrro'] = combined['mrro'].where(yearly_precip_threshold['pr'] & yearly_change_greater['pr'])
+    #combined['mrso'] = combined['mrso'].where(yearly_precip_threshold['pr'] & yearly_change_greater['pr'])
+    #combined['PET'] = combined['PET'].where(yearly_precip_threshold['pr'] & yearly_change_greater['pr'])
+    #combined['PETR'] = combined['PETR'].where(yearly_precip_threshold['pr'] & yearly_change_greater['pr'])
+
+    
     
     # calculate area for each gricell and store that in a 2nd array:
     latitudes = combined['lat'].values
@@ -285,16 +334,20 @@ for model_name in model_names:
     ###         annual trend           ###
     ######################################  
     
-    
     delta_ds = combined.copy()   
     
     delta_ds = delta_ds.assign(d_pr = calc_vardiff(delta_ds, 'pr'))
     delta_ds = delta_ds.assign(d_evspsbl = calc_vardiff(delta_ds, 'evspsbl'))
-    delta_ds = delta_ds.assign(d_change_mrso = calc_vardiff(delta_ds, 'mrso'))
     delta_ds = delta_ds.assign(d_mrro = calc_vardiff(delta_ds, 'mrro'))
     delta_ds = delta_ds.assign(d_PETR = calc_vardiff(delta_ds, 'PETR'))
     
-    
+    # For Plotting mask out areas with too little total precipitation and to little change in precipitation:
+    plot_dt = delta_ds.copy()
+    plot_dt['d_pr'] = plot_dt['d_pr'].where(yearly_precip_threshold['pr'] & yearly_change_greater['pr'])
+    plot_dt['d_evspsbl'] = plot_dt['d_evspsbl'].where(yearly_precip_threshold['pr'] & yearly_change_greater['pr'])
+    plot_dt['d_mrro'] = plot_dt['d_mrro'].where(yearly_precip_threshold['pr'] & yearly_change_greater['pr'])
+    plot_dt['d_PETR'] = plot_dt['d_PETR'].where(yearly_precip_threshold['pr'] & yearly_change_greater['pr'])
+
     # Plot the data
     fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(10, 5), subplot_kw={'projection': ccrs.PlateCarree()})
     
@@ -302,13 +355,13 @@ for model_name in model_names:
     titles = [r'$\Delta P$', r'$\Delta ET$', r'$\Delta Q$', r'$\Delta RES$']
     for (v, title, ax) in zip(variables, titles, axes.flat):
         if v in ['d_PETR']:
-            delta_ds[v].plot.imshow(ax=ax, cmap=pal_PRGn, extend='both',
+            plot_dt[v].plot.imshow(ax=ax, cmap=pal_PRGn, extend='both',
                                     center=0,
                                     vmin=-5e-7,
                                     vmax=5e-7,
                                     cbar_kwargs={'label': '[kg m⁻² s⁻¹]'})
         else:
-            delta_ds[v].plot.imshow(ax=ax, cmap=pal_PRGn, extend='both',
+            plot_dt[v].plot.imshow(ax=ax, cmap=pal_PRGn, extend='both',
                                     center=0,
                                     vmin=-5e-6,
                                     vmax=5e-6,
@@ -318,7 +371,7 @@ for model_name in model_names:
         ax.set_title(title)
     
     plt.tight_layout()
-    plt.savefig(plot_path + 'Delta_Vars_Yearly.png', dpi=300, transparent=True)
+    plt.savefig(plot_path + f'{model_name}_Delta_Vars_Yearly.png', dpi=300, transparent=True)
     plt.show()
     
     #################################
@@ -330,13 +383,19 @@ for model_name in model_names:
     delta_ds['delta_PR'] = delta_ds['d_pr']-delta_ds['d_mrro']     
     delta_ds['delta_PPETR'] = delta_ds['d_pr']-delta_ds['d_PETR']   
     
+    # For Plotting mask out areas with too little total precipitation and to little change in precipitation:
+    plot_dt = delta_ds.copy()
+    plot_dt['delta_PET'] = plot_dt['delta_PET'].where(yearly_precip_threshold['pr'] & yearly_change_greater['pr'])
+    plot_dt['delta_PR'] = plot_dt['delta_PR'].where(yearly_precip_threshold['pr'] & yearly_change_greater['pr'])
+    plot_dt['delta_PPETR'] = plot_dt['delta_PPETR'].where(yearly_precip_threshold['pr'] & yearly_change_greater['pr'])
+
     
     fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(15, 3), subplot_kw={'projection': ccrs.PlateCarree()})
     
     variables = ['delta_PET', 'delta_PR', 'delta_PPETR']
     titles_difference = [r'$\Delta (P-ET)$', r'$\Delta (P-Q)$', r'$\Delta (P-RES)$']
     for (v, title, ax) in zip(variables, titles_difference, axes.flat): 
-        abs(delta_ds[v]).plot.imshow(ax=ax, cmap=pal_Reds_r, extend='both',
+        abs(plot_dt[v]).plot.imshow(ax=ax, cmap=pal_Reds_r, extend='both',
                                 #center=0,
                                 #vmin=-4e-6,
                                 vmin=0,
@@ -348,7 +407,7 @@ for model_name in model_names:
         ax.set_title(title)
     
     plt.tight_layout()
-    plt.savefig(plot_path + 'Difference_PVars_Yearly.png', dpi=300, transparent=True)
+    plt.savefig(plot_path + f'{model_name}_Difference_PVars_Yearly.png', dpi=300, transparent=True)
     plt.show()
     
     
@@ -356,10 +415,15 @@ for model_name in model_names:
     ################ Check most similar change:
     sim_change = high_sim_allcells(data=delta_ds, var1='delta_PET', var2='delta_PR', var3='delta_PPETR')
     
+    # For Plotting mask out areas with too little total precipitation and to little change in precipitation:
+    plot_dt = sim_change.copy()
+    plot_dt = plot_dt.where(yearly_precip_threshold['pr'] & yearly_change_greater['pr'])
+ 
+    
     # Calculate areas for each category
-    PET_area = float((cell_areas_da * (sim_change == 1)).sum())
-    PR_area = float((cell_areas_da * (sim_change == 2)).sum())
-    PPETR_area = float((cell_areas_da * (sim_change == 3)).sum())
+    PET_area = float((cell_areas_da * (plot_dt == 1)).sum())
+    PR_area = float((cell_areas_da * (plot_dt == 2)).sum())
+    PPETR_area = float((cell_areas_da * (plot_dt == 3)).sum())
     
     # Total area
     total_area = PET_area + PR_area + PPETR_area
@@ -377,7 +441,7 @@ for model_name in model_names:
     fig, axes = plt.subplots(nrows=1, ncols=1, figsize=(7, 3), subplot_kw={'projection': ccrs.PlateCarree()})        
     
     # Plot the main map
-    sim_change.plot.imshow(ax=axes, cmap=cmap_highest_sim2, extend='both', vmin=1, vmax=3)
+    plot_dt.plot.imshow(ax=axes, cmap=cmap_highest_sim, extend='both', vmin=1, vmax=3)
     axes.set_title('Highest Similarity - Yearly')
     
     # Add the ocean feature colored in white
@@ -386,7 +450,7 @@ for model_name in model_names:
     
     left, bottom, width, height = 0.13, 0.16, 0.10, 0.19
     ax_inset = fig.add_axes([left, bottom, width, height], facecolor='white')
-    ax_inset.bar(categories, values, color=colors_highest_sim2, edgecolor='black')
+    ax_inset.bar(categories, values, color=colors_highest_sim, edgecolor='black')
     ax_inset.set_xlabel('')
     ax_inset.set_title('Area [%]')
     ax_inset.set_yticks([0, 20, 40, 60])
@@ -394,25 +458,29 @@ for model_name in model_names:
     ax_inset.set_xticklabels([])
     
     plt.tight_layout()
-    plt.savefig(plot_path + 'HighSimilarity_Difference_Yearly.png', dpi=300, transparent=True)
+    plt.savefig(plot_path + f'{model_name}_HighSimilarity_Difference_Yearly.png', dpi=300, transparent=True)
     plt.show()
     
     
     ### analyse in addition if the Precipitation will increase or decrease:
-    m_neg = delta_ds['d_pr'] < 0
+    m_neg = yearly_modelmean_dpr < 0
     
     np.unique(sim_change)
     data_modified = sim_change.where(~m_neg, sim_change+3)
     np.unique(data_modified)
     
+    # For Plotting mask out areas with too little total precipitation and to little change in precipitation:
+    plot_dt = data_modified.copy()
+    plot_dt = plot_dt.where(yearly_precip_threshold['pr'] & yearly_change_greater['pr'])
+
     #Barplot global:
-    PET_area_pos = float((cell_areas_da * (data_modified == 1)).sum())
-    PR_area_pos = float((cell_areas_da * (data_modified == 2)).sum())
-    PPETR_area_pos = float((cell_areas_da * (data_modified == 3)).sum())
+    PET_area_pos = float((cell_areas_da * (plot_dt == 1)).sum())
+    PR_area_pos = float((cell_areas_da * (plot_dt == 2)).sum())
+    PPETR_area_pos = float((cell_areas_da * (plot_dt == 3)).sum())
     
-    PET_area_neg = float((cell_areas_da * (data_modified == 4)).sum())
-    PR_area_neg = float((cell_areas_da * (data_modified == 5)).sum())
-    PPETR_area_neg = float((cell_areas_da * (data_modified == 6)).sum())
+    PET_area_neg = float((cell_areas_da * (plot_dt == 4)).sum())
+    PR_area_neg = float((cell_areas_da * (plot_dt == 5)).sum())
+    PPETR_area_neg = float((cell_areas_da * (plot_dt == 6)).sum())
     
     # Total area
     total_area = PET_area_pos + PR_area_pos + PPETR_area_pos + PET_area_neg + PR_area_neg + PPETR_area_neg
@@ -435,149 +503,7 @@ for model_name in model_names:
     fig, axes = plt.subplots(nrows=1, ncols=1, figsize=(7, 3), subplot_kw={'projection': ccrs.PlateCarree()})        
     
     # Plot the main map
-    data_modified.plot.imshow(ax=axes, cmap=cmap_highest_sim_Pmask2, extend='both', vmin=1, vmax=6)
-    axes.add_feature(ocean)
-    axes.coastlines()
-    axes.set_title('Highest Similarity - Yearly')
-    
-    # Inset for the bar plot
-    left, bottom, width, height = 0.11, 0.16, 0.14, 0.19
-    ax_inset = fig.add_axes([left, bottom, width, height], facecolor='white')
-    ax_inset.bar(categories, values, color=colors_highest_sim_Pmask2, edgecolor='black')
-    ax_inset.set_xlabel('')
-    ax_inset.set_title('Area [%]')
-    ax_inset.set_yticks([0, 10, 20, 30, 40])
-    ax_inset.set_xticks([])
-    ax_inset.set_xticklabels([])
-    
-    plt.tight_layout()
-    plt.savefig(plot_path + 'HighSimilarity_Difference_Yearly_Pmask.png', dpi=300, transparent=True)
-    plt.show()
-    
-    
-    ############################
-    # High Similarity - RATIOS #
-    ############################ 
-    
-    delta_ds['ratio_ETP'] = delta_ds['d_evspsbl']/delta_ds['d_pr']
-    delta_ds['ratio_RP'] = delta_ds['d_mrro']/delta_ds['d_pr'] 
-    delta_ds['ratio_PETRP'] = delta_ds['d_PETR']/delta_ds['d_pr']
-    
-        
-    pal_RdBu = mpl.colormaps.get_cmap('RdBu')
-    pal_RdBu.set_bad(color='lightgray')
-    
-    
-    fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(15, 3), subplot_kw={'projection': ccrs.PlateCarree()})
-    
-    variables = ['ratio_ETP', 'ratio_RP', 'ratio_PETRP']
-    titles_ratio = titles = [r'$\Delta ET / \Delta P $', r'$\Delta Q / \Delta P $', r'$\Delta RES / \Delta P $']
-    
-    for (v, title, ax) in zip(variables, titles_ratio, axes.flat):  # Verwende zip() anstelle von enumerate()
-        delta_ds[v].plot.imshow(ax=ax, 
-                                cmap=pal_RdBu, 
-                                extend='both',
-                                #center=0,
-                                #vmin=-4e-6,
-                                vmin=-2,
-                                vmax=2)
-        ax.add_feature(ocean)
-        ax.coastlines()
-        ax.set_title(title)
-    
-    plt.tight_layout()
-    plt.savefig(plot_path + 'HighSimilarity_Ratio_Yearly.png', dpi=300, transparent=True)
-    plt.show()
-    
-    
-    ratio1 = ratio1_index_allcells(data=delta_ds, var1='ratio_ETP', var2='ratio_RP', var3='ratio_PETRP')
-    print(np.unique(ratio1))
-    
-    ############## Plot most similar changes:
-    PET_area = float((cell_areas_da * (ratio1 == 1)).sum())
-    PR_area = float((cell_areas_da * (ratio1 == 2)).sum())
-    PPETR_area = float((cell_areas_da * (ratio1 == 3)).sum())
-    unclear_area = float((cell_areas_da * (ratio1 == 4)).sum())
-    
-    total_area = PET_area + PR_area + PPETR_area + unclear_area
-    
-    perc_PET = (PET_area / total_area) * 100
-    perc_PR = (PR_area / total_area) * 100
-    perc_PPETR = (PPETR_area / total_area) * 100
-    perc_unclear = (unclear_area / total_area ) * 100
-    
-    categories = ['ratio_ETP', 'ratio_RP', 'ratio_PETRP', 'unclear']
-    values = [perc_PET, perc_PR, perc_PPETR, perc_unclear]
-    
-    ## Plot:
-    fig, axes = plt.subplots(nrows=1, ncols=1, figsize=(7, 3), subplot_kw={'projection': ccrs.PlateCarree()})        
-    
-    # Plot the main map
-    ratio1.plot.imshow(ax=axes, cmap=cmap_highest_sim, extend='both', vmin=1, vmax=4)
-    axes.add_feature(ocean)
-    axes.coastlines()
-    axes.set_title('Highest Similarity - Yearly')
-    
-    # Inset for the bar plot
-    left, bottom, width, height = 0.13, 0.16, 0.10, 0.19
-    ax_inset = fig.add_axes([left, bottom, width, height], facecolor='white')
-    ax_inset.bar(categories, values, color=colors_highest_sim, edgecolor='black')
-    ax_inset.set_xlabel('')
-    ax_inset.set_title('Area [%]')
-    ax_inset.set_yticks([0, 20, 40, 60])
-    ax_inset.set_xticks([])
-    ax_inset.set_xticklabels([])
-    
-    plt.tight_layout()
-    plt.savefig(plot_path + 'HighSimilarity_Ratio_Yearly.png', dpi=300)
-    plt.show()
-    
-    ### analyse in addition if the Precipitation will increase or decrease:
-    m_neg = delta_ds['d_pr'] < 0
-    
-    print(np.unique(ratio1))
-    data_modified = ratio1.where(~m_neg, ratio1+4)
-    print(np.unique(data_modified))
-    
-    #Barplot global:
-    PET_area_pos = float((cell_areas_da * (data_modified == 1)).sum())
-    PR_area_pos = float((cell_areas_da * (data_modified == 2)).sum())
-    PPETR_area_pos = float((cell_areas_da * (data_modified == 3)).sum())
-    unclear_area_pos = float((cell_areas_da * (data_modified == 4)).sum())
-    
-    PET_area_neg = float((cell_areas_da * (data_modified == 5)).sum())
-    PR_area_neg = float((cell_areas_da * (data_modified == 6)).sum())
-    PPETR_area_neg = float((cell_areas_da * (data_modified == 7)).sum())
-    unclear_area_neg = float((cell_areas_da * (data_modified == 8)).sum())
-    
-    # Total area
-    total_area = PET_area_pos + PR_area_pos + PPETR_area_pos + unclear_area_pos + PET_area_neg + PR_area_neg + PPETR_area_neg + unclear_area_neg
-    
-    perc_PET_pos = (PET_area_pos / total_area) * 100
-    perc_PR_pos = (PR_area_pos / total_area) * 100
-    perc_PPETR_pos = (PPETR_area_pos / total_area) * 100
-    perc_unclear_pos = (unclear_area_pos / total_area) * 100
-    
-    perc_PET_neg = (PET_area_neg / total_area) * 100
-    perc_PR_neg = (PR_area_neg / total_area) * 100
-    perc_PPETR_neg = (PPETR_area_neg / total_area) * 100
-    perc_unclear_neg = (unclear_area_neg / total_area) * 100
-    
-    
-    categories = ['$\Delta$ET/$\Delta$P pos', '$\Delta$R/$\Delta$P pos', '$\Delta$RES/$\Delta$P pos', 'unclear pos',
-                  '$\Delta$ET/$\Delta$P neg', '$\Delta$R/$\Delta$P neg', '$\$\Delta$RES/$\Delta$P neg', 'unclear neg']
-    values = [perc_PET_pos, perc_PR_pos, perc_PPETR_pos, perc_unclear_pos,
-              perc_PET_neg, perc_PR_neg, perc_PPETR_neg, perc_unclear_neg]
-    
-    
-    
-    ## Plot:
-    fig, axes = plt.subplots(nrows=1, ncols=1, figsize=(7, 3), subplot_kw={'projection': ccrs.PlateCarree()})        
-    
-    # Plot the main map
-    data_modified.plot.imshow(ax=axes, cmap=cmap_highest_sim_Pmask,  extend='both', 
-                                          cbar_kwargs={'label': 'Highest Change'}, 
-                                          vmin=1, vmax=8)
+    plot_dt.plot.imshow(ax=axes, cmap=cmap_highest_sim_Pmask, extend='both', vmin=1, vmax=6)
     axes.add_feature(ocean)
     axes.coastlines()
     axes.set_title('Highest Similarity - Yearly')
@@ -593,7 +519,156 @@ for model_name in model_names:
     ax_inset.set_xticklabels([])
     
     plt.tight_layout()
-    plt.savefig(plot_path + 'HighSimilarity_Ratio_Yearly_Pmask.png', dpi=300)
+    plt.savefig(plot_path + f'{model_name}_HighSimilarity_Difference_Yearly_Pmask.png', dpi=300, transparent=True)
+    plt.show()
+    
+    
+    ############################
+    # High Similarity - RATIOS #
+    ############################ 
+    
+    delta_ds['ratio_ETP'] = delta_ds['d_evspsbl']/delta_ds['d_pr']
+    delta_ds['ratio_RP'] = delta_ds['d_mrro']/delta_ds['d_pr'] 
+    delta_ds['ratio_PETRP'] = delta_ds['d_PETR']/delta_ds['d_pr']
+    
+    # For Plotting mask out areas with too little total precipitation and to little change in precipitation:
+    plot_dt = delta_ds.copy()
+    plot_dt['ratio_ETP'] = plot_dt['ratio_ETP'].where(yearly_precip_threshold['pr'] & yearly_change_greater['pr'])
+    plot_dt['ratio_RP'] = plot_dt['ratio_RP'].where(yearly_precip_threshold['pr'] & yearly_change_greater['pr'])
+    plot_dt['ratio_PETRP'] = plot_dt['ratio_PETRP'].where(yearly_precip_threshold['pr'] & yearly_change_greater['pr'])
+
+    
+    fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(15, 3), subplot_kw={'projection': ccrs.PlateCarree()})
+    
+    variables = ['ratio_ETP', 'ratio_RP', 'ratio_PETRP']
+    titles_ratio = titles = [r'$\Delta ET / \Delta P $', r'$\Delta Q / \Delta P $', r'$\Delta RES / \Delta P $']
+    
+    for (v, title, ax) in zip(variables, titles_ratio, axes.flat):  # Verwende zip() anstelle von enumerate()
+        plot_dt[v].plot.imshow(ax=ax, 
+                                cmap=pal_RdBu, 
+                                extend='both',
+                                #center=0,
+                                #vmin=-4e-6,
+                                vmin=-2,
+                                vmax=2)
+        ax.add_feature(ocean)
+        ax.coastlines()
+        ax.set_title(title)
+    
+    plt.tight_layout()
+    plt.savefig(plot_path + f'{model_name}_HighSimilarity_Ratio_Yearly.png', dpi=300, transparent=True)
+    plt.show()
+    
+    
+    ratio1 = ratio1_index_allcells(data=delta_ds, var1='ratio_ETP', var2='ratio_RP', var3='ratio_PETRP')
+    print(np.unique(ratio1))
+    
+    # For Plotting mask out areas with too little total precipitation and to little change in precipitation:
+    plot_dt = ratio1.copy()
+    plot_dt = plot_dt.where(yearly_precip_threshold['pr'] & yearly_change_greater['pr'])
+
+    
+    ############## Plot most similar changes:
+    PET_area = float((cell_areas_da * (plot_dt == 1)).sum())
+    PR_area = float((cell_areas_da * (plot_dt == 2)).sum())
+    PPETR_area = float((cell_areas_da * (plot_dt == 3)).sum())
+    
+    total_area = PET_area + PR_area + PPETR_area #+ unclear_area
+    
+    perc_PET = (PET_area / total_area) * 100
+    perc_PR = (PR_area / total_area) * 100
+    perc_PPETR = (PPETR_area / total_area) * 100
+    
+    categories = ['ratio_ETP', 'ratio_RP', 'ratio_PETRP']
+    values = [perc_PET, perc_PR, perc_PPETR]
+    
+    
+    ## Plot:
+    fig, axes = plt.subplots(nrows=1, ncols=1, figsize=(7, 3), subplot_kw={'projection': ccrs.PlateCarree()})        
+    
+    # Plot the main map
+    plot_dt.plot.imshow(ax=axes, cmap=cmap_highest_sim, extend='both', vmin=1, vmax=3)
+    axes.add_feature(ocean)
+    axes.coastlines()
+    axes.set_title('Highest Similarity - Yearly')
+    
+    # Inset for the bar plot
+    left, bottom, width, height = 0.13, 0.16, 0.10, 0.19
+    ax_inset = fig.add_axes([left, bottom, width, height], facecolor='white')
+    ax_inset.bar(categories, values, color=colors_highest_sim, edgecolor='black')
+    ax_inset.set_xlabel('')
+    ax_inset.set_title('Area [%]')
+    ax_inset.set_yticks([0, 20, 40, 60])
+    ax_inset.set_xticks([])
+    ax_inset.set_xticklabels([])
+    
+    plt.tight_layout()
+    plt.savefig(plot_path + f'{model_name}_HighSimilarity_Ratio_Yearly.png', dpi=300)
+    plt.show()
+    
+    ### analyse in addition if the Precipitation will increase or decrease:
+    m_neg = yearly_modelmean_dpr < 0
+    
+    print(np.unique(ratio1))
+    data_modified = ratio1.where(~m_neg, ratio1 + 3)
+    print(np.unique(data_modified))
+    
+    # For Plotting mask out areas with too little total precipitation and to little change in precipitation:
+    plot_dt = data_modified.copy()
+    plot_dt = plot_dt.where(yearly_precip_threshold['pr'] & yearly_change_greater['pr'])
+
+    
+    #Barplot global:
+    PET_area_pos = float((cell_areas_da * (plot_dt == 1)).sum())
+    PR_area_pos = float((cell_areas_da * (plot_dt == 2)).sum())
+    PPETR_area_pos = float((cell_areas_da * (plot_dt == 3)).sum())
+    
+    PET_area_neg = float((cell_areas_da * (plot_dt == 4)).sum())
+    PR_area_neg = float((cell_areas_da * (plot_dt == 5)).sum())
+    PPETR_area_neg = float((cell_areas_da * (plot_dt == 6)).sum())
+    
+    # Total area
+    total_area = PET_area_pos + PR_area_pos + PPETR_area_pos + PET_area_neg + PR_area_neg + PPETR_area_neg 
+    
+    perc_PET_pos = (PET_area_pos / total_area) * 100
+    perc_PR_pos = (PR_area_pos / total_area) * 100
+    perc_PPETR_pos = (PPETR_area_pos / total_area) * 100
+    
+    perc_PET_neg = (PET_area_neg / total_area) * 100
+    perc_PR_neg = (PR_area_neg / total_area) * 100
+    perc_PPETR_neg = (PPETR_area_neg / total_area) * 100
+    
+    
+    categories = ['$\Delta$ET/$\Delta$P pos', '$\Delta$R/$\Delta$P pos', '$\Delta$RES/$\Delta$P pos',
+                  '$\Delta$ET/$\Delta$P neg', '$\Delta$R/$\Delta$P neg', '$\$\Delta$RES/$\Delta$P neg']
+    values = [perc_PET_pos, perc_PR_pos, perc_PPETR_pos,
+              perc_PET_neg, perc_PR_neg, perc_PPETR_neg]
+    
+    
+    
+    ## Plot:
+    fig, axes = plt.subplots(nrows=1, ncols=1, figsize=(7, 3), subplot_kw={'projection': ccrs.PlateCarree()})        
+    
+    # Plot the main map
+    plot_dt.plot.imshow(ax=axes, cmap=cmap_highest_sim_Pmask,  extend='both', 
+                                          cbar_kwargs={'label': 'Highest Change'}, 
+                                          vmin=1, vmax=6)
+    axes.add_feature(ocean)
+    axes.coastlines()
+    axes.set_title('Highest Similarity - Yearly')
+    
+    # Inset for the bar plot
+    left, bottom, width, height = 0.11, 0.16, 0.14, 0.19
+    ax_inset = fig.add_axes([left, bottom, width, height], facecolor='white')
+    ax_inset.bar(categories, values, color=colors_highest_sim_Pmask, edgecolor='black')
+    ax_inset.set_xlabel('')
+    ax_inset.set_title('Area [%]')
+    ax_inset.set_yticks([0, 10, 20, 30, 40])
+    ax_inset.set_xticks([])
+    ax_inset.set_xticklabels([])
+    
+    plt.tight_layout()
+    plt.savefig(plot_path + f'{model_name}_HighSimilarity_Ratio_Yearly_Pmask.png', dpi=300)
     plt.show()
     
     
@@ -605,7 +680,8 @@ for model_name in model_names:
                       'ratio_ETP', 'ratio_RP', 'ratio_PETRP', 'sim_change', 'sim_change_Pmask']]
     delta.to_netcdf(data_path + model_name + '_delta.nc')
     
-    all_models_delta.append(delta)
+    #all_models_delta.append(delta)
+    all_models_delta.append({'name': model_name, 'delta': delta})
     
     print(f'stored delta data for model {model_name}.')
     ###################################### 
@@ -615,13 +691,28 @@ for model_name in model_names:
     sdelta_ds = combined.copy() 
     
     # Calculate Difference between 2100 and 2025
+    sdelta_ds = sdelta_ds.assign(d_tas = calc_vardiff_season(sdelta_ds, 'tas'))
     sdelta_ds = sdelta_ds.assign(d_pr = calc_vardiff_season(sdelta_ds, 'pr'))
     sdelta_ds = sdelta_ds.assign(d_evspsbl = calc_vardiff_season(sdelta_ds, 'evspsbl'))
     sdelta_ds = sdelta_ds.assign(d_mrro = calc_vardiff_season(sdelta_ds, 'mrro'))
     sdelta_ds = sdelta_ds.assign(d_PETR = calc_vardiff_season(sdelta_ds, 'PETR'))
     sdelta_ds = sdelta_ds.assign(d_mrso = calc_vardiff_season(sdelta_ds, 'mrso'))
     
-    # Plot the data
+    #sdelta_ds['d_pr'] = sdelta_ds['d_pr'].where(yearly_precip_threshold['pr'] & seasons_change_greater['pr'])
+    #sdelta_ds['d_evspsbl'] = sdelta_ds['d_evspsbl'].where(yearly_precip_threshold['pr'] & seasons_change_greater['pr'])
+    #sdelta_ds['d_mrro'] = sdelta_ds['d_mrro'].where(yearly_precip_threshold['pr'] & seasons_change_greater['pr'])
+    #sdelta_ds['d_PETR'] = sdelta_ds['d_PETR'].where(yearly_precip_threshold['pr'] & seasons_change_greater['pr'])
+    #sdelta_ds['d_mrso'] = sdelta_ds['d_mrso'].where(yearly_precip_threshold['pr'] & seasons_change_greater['pr'])
+    #sdelta_ds['d_tas'] = sdelta_ds['d_tas'].where(yearly_precip_threshold['pr'] & seasons_change_greater['pr'])
+
+    
+    # For Plotting mask out areas with too little total precipitation and to little change in precipitation:
+    plot_dt = sdelta_ds.copy()
+    plot_dt['d_pr'] = plot_dt['d_pr'].where(yearly_precip_threshold['pr'] & seasons_change_greater['pr'])
+    plot_dt['d_evspsbl'] = plot_dt['d_evspsbl'].where(yearly_precip_threshold['pr'] & seasons_change_greater['pr'])
+    plot_dt['d_mrro'] = plot_dt['d_mrro'].where(yearly_precip_threshold['pr'] & seasons_change_greater['pr'])
+    plot_dt['d_PETR'] = plot_dt['d_PETR'].where(yearly_precip_threshold['pr'] & seasons_change_greater['pr'])
+
     variables = ['d_pr','d_evspsbl','d_mrro', 'd_PETR']
     seasons = ['DJF', 'MAM', 'JJA', 'SON']
     
@@ -634,7 +725,7 @@ for model_name in model_names:
             #season ='DJF'
             #variable = 'd_pr'
             ax = axes[i, j]
-            sdelta_ds[variable].sel(season=s).plot.imshow(ax=ax, cmap=pal_PRGn, extend='both',
+            plot_dt[variable].sel(season=s).plot.imshow(ax=ax, cmap=pal_PRGn, extend='both',
                                                     center=0,
                                                     vmin=-5e-6,
                                                     vmax=+5e-6,
@@ -644,7 +735,7 @@ for model_name in model_names:
             ax.set_title(f'{title} - {s}')
     
     plt.tight_layout()
-    plt.savefig(plot_path + 'Delta_Vars_Seasons.png', dpi=300, transparent=True)
+    plt.savefig(plot_path + f'{model_name}_Delta_Vars_Seasons.png', dpi=300, transparent=True)
     plt.show()
     
     
@@ -655,7 +746,14 @@ for model_name in model_names:
     # substract the changes from each other: 
     sdelta_ds['delta_PET'] = sdelta_ds['d_pr']-sdelta_ds['d_evspsbl']     
     sdelta_ds['delta_PR'] = sdelta_ds['d_pr']-sdelta_ds['d_mrro']     
-    sdelta_ds['delta_PPETR'] = sdelta_ds['d_pr']-sdelta_ds['d_PETR']     
+    sdelta_ds['delta_PPETR'] = sdelta_ds['d_pr']-sdelta_ds['d_PETR']    
+    
+    # For Plotting mask out areas with too little total precipitation and to little change in precipitation:
+    plot_dt = sdelta_ds.copy()
+    plot_dt['delta_PET'] = plot_dt['delta_PET'].where(yearly_precip_threshold['pr'] & seasons_change_greater['pr'])
+    plot_dt['delta_PR'] = plot_dt['delta_PR'].where(yearly_precip_threshold['pr'] & seasons_change_greater['pr'])
+    plot_dt['delta_PPETR'] = plot_dt['delta_PPETR'].where(yearly_precip_threshold['pr'] & seasons_change_greater['pr'])
+
     
     fig, axes = plt.subplots(nrows=len(seasons), ncols=3, figsize=(12, 8), subplot_kw={'projection': ccrs.PlateCarree()})
     
@@ -663,7 +761,7 @@ for model_name in model_names:
     for i, s in enumerate(seasons):
         for j, title, variable in zip([0,1,2,3], titles_difference, variables):
             ax = axes[i, j]
-            abs(sdelta_ds[variable]).sel(season=s).plot.imshow(ax=ax, cmap=pal_Reds_r, extend='both',
+            abs(plot_dt[variable]).sel(season=s).plot.imshow(ax=ax, cmap=pal_Reds_r, extend='both',
                                                     #center=0,
                                                     #vmin=-5e-6,
                                                     vmin=0,
@@ -673,7 +771,7 @@ for model_name in model_names:
             ax.set_title(f'{title} - {s}')
     
     plt.tight_layout()
-    plt.savefig(plot_path + 'Difference_PVars_Seasons.png', dpi=300, transparent=True)
+    plt.savefig(plot_path + f'{model_name}_Difference_PVars_Seasons.png', dpi=300, transparent=True)
     plt.show()
     
     high_sim_seasons = {}
@@ -685,12 +783,19 @@ for model_name in model_names:
     #get rid of season dimension:
     high_sim_seasons = {s: da.squeeze('season') for s, da in high_sim_seasons.items()}
     
+    # For Plotting mask out areas with too little total precipitation and to little change in precipitation:
+    plot_dt = high_sim_seasons.copy()
+    plot_dt = {season: plot_dt[season].where(yearly_precip_threshold['pr']) for season in plot_dt}
+    plot_dt = {
+        season: plot_dt[season].where(seasons_change_greater['pr'].sel(season=season))
+        for season in plot_dt}
+
     
     bar_data = []
     for i in seasons:
-        PET_area = float((cell_areas_da * (high_sim_seasons[i] == 1)).sum())
-        PR_area = float((cell_areas_da * (high_sim_seasons[i]  == 2)).sum())
-        PPETR_area = float((cell_areas_da * (high_sim_seasons[i]  == 3)).sum())
+        PET_area = float((cell_areas_da * (plot_dt[i] == 1)).sum())
+        PR_area = float((cell_areas_da * (plot_dt[i]  == 2)).sum())
+        PPETR_area = float((cell_areas_da * (plot_dt[i]  == 3)).sum())
         
         total_area = PET_area + PR_area + PPETR_area
         
@@ -710,7 +815,7 @@ for model_name in model_names:
             
             ax = axes[i]
            
-            high_sim_seasons[s].plot.imshow(ax=ax, cmap=cmap_highest_sim2, extend='both', vmin=1, vmax=3)
+            plot_dt[s].plot.imshow(ax=ax, cmap=cmap_highest_sim, extend='both', vmin=1, vmax=3)
             ax.add_feature(ocean)
             ax.coastlines()
             ax.set_title(f'{s}')
@@ -718,7 +823,7 @@ for model_name in model_names:
             # Create an inset for the bar plot
             left, bottom, width, height = 0.11, 0.16, 0.14, 0.22
             inset_ax = ax.inset_axes([left, bottom, width, height], facecolor='white')
-            inset_ax.bar(x_values, bar_data[i], color=colors_highest_sim2, edgecolor='black')
+            inset_ax.bar(x_values, bar_data[i], color=colors_highest_sim, edgecolor='black')
             inset_ax.set_xlabel('')
             inset_ax.set_title('Area [%]')
             inset_ax.set_yticks([0, 25, 50, 75])
@@ -726,13 +831,13 @@ for model_name in model_names:
             inset_ax.set_xticklabels([])
     
     plt.tight_layout()
-    plt.savefig(plot_path + 'HighSimilarity_Difference_Seasons.png', dpi=300)
+    plt.savefig(plot_path + f'{model_name}_HighSimilarity_Difference_Seasons.png', dpi=300)
     plt.show()
         
     
     
     ### analyse in addition if the Precipitation will increase or decrease:
-    s_neg = sdelta_ds['d_pr'] < 0
+    s_neg = season_modelmean_dpr < 0
     
     data_modified_ls = copy.deepcopy(high_sim_seasons)
     
@@ -741,16 +846,23 @@ for model_name in model_names:
         data_modified_ls[season] = high_sim_seasons[season].where(~s_neg.sel(season=season), high_sim_seasons[season] + 3)
         print(f"Unique values in modified {season}: {np.unique(data_modified_ls[season])}")
     
+    # For Plotting mask out areas with too little total precipitation and to little change in precipitation:
+    plot_dt = data_modified_ls.copy()
+    plot_dt = {season: plot_dt[season].where(yearly_precip_threshold['pr']) for season in plot_dt}
+    plot_dt = {
+        season: plot_dt[season].where(seasons_change_greater['pr'].sel(season=season))
+        for season in plot_dt}
+
+    
     #Get barplot data:
     bar_data = []
     for i in seasons:
-        PET_area_pos = float((cell_areas_da * (data_modified_ls[i] == 1)).sum())
-        PR_area_pos = float((cell_areas_da * (data_modified_ls[i]  == 2)).sum())
-        PPETR_area_pos = float((cell_areas_da * (data_modified_ls[i]  == 3)).sum())
-    
-        PET_area_neg = float((cell_areas_da * (data_modified_ls[i] == 4)).sum())
-        PR_area_neg = float((cell_areas_da * (data_modified_ls[i]  == 5)).sum())
-        PPETR_area_neg = float((cell_areas_da * (data_modified_ls[i]  == 6)).sum())
+        PET_area_pos = float((cell_areas_da * (plot_dt[i] == 1)).sum())
+        PR_area_pos = float((cell_areas_da * (plot_dt[i]  == 2)).sum())
+        PPETR_area_pos = float((cell_areas_da * (plot_dt[i]  == 3)).sum())
+        PET_area_neg = float((cell_areas_da * (plot_dt[i] == 4)).sum())
+        PR_area_neg = float((cell_areas_da * (plot_dt[i]  == 5)).sum())
+        PPETR_area_neg = float((cell_areas_da * (plot_dt[i]  == 6)).sum())
         
         total_area = PET_area_pos + PR_area_pos + PPETR_area_pos + PET_area_neg + PR_area_neg + PPETR_area_neg
         
@@ -774,10 +886,10 @@ for model_name in model_names:
     
     for i, s  in zip([0,1,2,3], ['DJF', 'MAM', 'JJA', 'SON']):
             
-            season_dt = data_modified_ls[s].squeeze()
+            season_dt = plot_dt[s].squeeze()
             ax = axes[i]
            
-            season_dt.plot.imshow(ax=ax, cmap=cmap_highest_sim_Pmask2, extend='both', vmin=1, vmax=6)
+            season_dt.plot.imshow(ax=ax, cmap=cmap_highest_sim_Pmask, extend='both', vmin=1, vmax=6)
             ax.add_feature(ocean)
             ax.coastlines()
             ax.set_title(f'{s}')
@@ -785,7 +897,7 @@ for model_name in model_names:
             #Inset for the bar plot
             left, bottom, width, height = 0.08, 0.16, 0.19, 0.22
             inset_ax = ax.inset_axes([left, bottom, width, height], facecolor='white')
-            inset_ax.bar(x_values, bar_data[i], color=colors_highest_sim_Pmask2, edgecolor='black')
+            inset_ax.bar(x_values, bar_data[i], color=colors_highest_sim_Pmask, edgecolor='black')
             inset_ax.set_xlabel('')
             inset_ax.set_title('Area [%]')
             inset_ax.set_yticks([0, 10, 20, 30, 40])
@@ -794,7 +906,7 @@ for model_name in model_names:
     
     
     plt.tight_layout()
-    plt.savefig(plot_path + 'HighSimilarity_Difference_Seasons_Pmask.png', dpi=300)
+    plt.savefig(plot_path + f'{model_name}_HighSimilarity_Difference_Seasons_Pmask.png', dpi=300)
     plt.show()
     
     #################################
@@ -806,13 +918,19 @@ for model_name in model_names:
     sdelta_ds['ratio_RP'] = sdelta_ds['d_mrro']/sdelta_ds['d_pr']     
     sdelta_ds['ratio_PETRP'] = sdelta_ds['d_PETR']/sdelta_ds['d_pr']
     
+    # For Plotting mask out areas with too little total precipitation and to little change in precipitation:
+    plot_dt = sdelta_ds.copy()
+    plot_dt['ratio_ETP'] = plot_dt['ratio_ETP'].where(yearly_precip_threshold['pr'] & seasons_change_greater['pr'])
+    plot_dt['ratio_RP'] = plot_dt['ratio_RP'].where(yearly_precip_threshold['pr'] & seasons_change_greater['pr'])
+    plot_dt['ratio_PETRP'] = plot_dt['ratio_PETRP'].where(yearly_precip_threshold['pr'] & seasons_change_greater['pr'])
+
     fig, axes = plt.subplots(nrows=len(seasons), ncols=3, figsize=(12, 8), subplot_kw={'projection': ccrs.PlateCarree()})
     
     titles_ratio = titles = [r'$\Delta ET / \Delta P $', r'$\Delta Q / \Delta P $', r'$\Delta RES / \Delta P $']
     for i, s in enumerate(seasons):
         for j, title, variable in zip([0,1,2,3], titles_ratio, ['ratio_ETP', 'ratio_RP', 'ratio_PETRP']):
             ax = axes[i, j]
-            abs(sdelta_ds[variable]).sel(season=s).plot.imshow(ax=ax, cmap=pal_RdBu, extend='both',
+            abs(plot_dt[variable]).sel(season=s).plot.imshow(ax=ax, cmap=pal_RdBu, extend='both',
                                                     #center=0,
                                                     #vmin=-5e-6,
                                                     vmin=-2,
@@ -822,7 +940,7 @@ for model_name in model_names:
             ax.set_title(f'{title} - {s}')
     
     plt.tight_layout()
-    plt.savefig(plot_path + 'Ratio_PVars_Seasons.png', dpi=300, transparent=True)
+    plt.savefig(plot_path + f'{model_name}_Ratio_PVars_Seasons.png', dpi=300, transparent=True)
     plt.show()
     
     high_sim_seasons = {}
@@ -833,21 +951,27 @@ for model_name in model_names:
     #get rid of season dimension:
     high_sim_seasons = {s: da.squeeze('season') for s, da in high_sim_seasons.items()}
     
+    # For Plotting mask out areas with too little total precipitation and to little change in precipitation:
+    plot_dt = high_sim_seasons.copy()
+    plot_dt = {season: plot_dt[season].where(yearly_precip_threshold['pr']) for season in plot_dt}
+    plot_dt = {
+        season: plot_dt[season].where(seasons_change_greater['pr'].sel(season=season))
+        for season in plot_dt}
+
+    
     bar_data = []
     for i in seasons:
-        PET_area = float((cell_areas_da * (high_sim_seasons[i] == 1)).sum())
-        PR_area = float((cell_areas_da * (high_sim_seasons[i]  == 2)).sum())
-        PPETR_area = float((cell_areas_da * (high_sim_seasons[i]  == 3)).sum())
-        unclear_area = float((cell_areas_da * (high_sim_seasons[i]  == 4)).sum())
+        PET_area = float((cell_areas_da * (plot_dt[i] == 1)).sum())
+        PR_area = float((cell_areas_da * (plot_dt[i]  == 2)).sum())
+        PPETR_area = float((cell_areas_da * (plot_dt[i]  == 3)).sum())
         
-        total_area = PET_area + PR_area + PPETR_area + unclear_area
+        total_area = PET_area + PR_area + PPETR_area 
         
         perc_PET = (PET_area / total_area) * 100
         perc_PR = (PR_area / total_area) * 100
         perc_PPETR = (PPETR_area / total_area) * 100
-        perc_unclear = (unclear_area / total_area) * 100
         
-        values = [perc_PET, perc_PR, perc_PPETR, perc_unclear]
+        values = [perc_PET, perc_PR, perc_PPETR]
         
         bar_data.append(values)
     
@@ -859,9 +983,9 @@ for model_name in model_names:
     for i, s  in zip([0,1,2,3], ['DJF', 'MAM', 'JJA', 'SON']):
             
             ax = axes[i]
-            high_sim_seasons[s].plot.imshow(ax=ax, cmap=cmap_highest_sim, extend='both', 
+            plot_dt[s].plot.imshow(ax=ax, cmap=cmap_highest_sim, extend='both', 
                                                   cbar_kwargs={'label': 'Highest Similarity'}, 
-                                                  vmin=1, vmax=4)
+                                                  vmin=1, vmax=3)
             ax.add_feature(ocean)
             ax.coastlines()
             ax.set_title(f'{s}')
@@ -869,7 +993,7 @@ for model_name in model_names:
             # Create an inset for the bar plot
             left, bottom, width, height = 0.10, 0.12, 0.12, 0.22
             inset_ax = ax.inset_axes([left, bottom, width, height], facecolor='white')
-            inset_ax.bar(x_values, bar_data[i], color=colors_highest_sim_Pmask, edgecolor='black')
+            inset_ax.bar(x_values, bar_data[i], color=colors_highest_sim, edgecolor='black')
             inset_ax.set_xlabel('')
             inset_ax.set_title('No. of cells [%]')
             inset_ax.set_yticks([0, 25, 50, 75])
@@ -877,49 +1001,51 @@ for model_name in model_names:
             inset_ax.set_xticklabels([])
     
     plt.tight_layout()
-    plt.savefig(plot_path + 'HighSimilarity_Ratio_Seasons.png', dpi=300)
+    plt.savefig(plot_path + f'{model_name}_HighSimilarity_Ratio_Seasons.png', dpi=300)
     plt.show()
         
     
     
     ### analyse in addition if the Precipitation will increase or decrease:
-    s_neg = sdelta_ds['d_pr'] < 0
+    s_neg = season_modelmean_dpr < 0
     
     data_modified_ls = copy.deepcopy(high_sim_seasons)
     
     for season in seasons:
         print(f"Unique values in original {season}: {np.unique(high_sim_seasons[season])}")
-        data_modified_ls[season] = high_sim_seasons[season].where(~s_neg.sel(season=season), high_sim_seasons[season] + 4)
+        data_modified_ls[season] = high_sim_seasons[season].where(~s_neg.sel(season=season), high_sim_seasons[season] + 3)
         print(f"Unique values in modified {season}: {np.unique(data_modified_ls[season])}")
     
+    # For Plotting mask out areas with too little total precipitation and to little change in precipitation:
+    plot_dt = data_modified_ls.copy()
+    plot_dt = {season: plot_dt[season].where(yearly_precip_threshold['pr']) for season in plot_dt}
+    plot_dt = {
+        season: plot_dt[season].where(seasons_change_greater['pr'].sel(season=season))
+        for season in plot_dt}
+
     
     #Get barplot data:
     bar_data = []
     for i in seasons:
-        PET_area_pos = float((cell_areas_da * (data_modified_ls[i] == 1)).sum())
-        PR_area_pos = float((cell_areas_da * (data_modified_ls[i]  == 2)).sum())
-        PPETR_area_pos = float((cell_areas_da * (data_modified_ls[i]  == 3)).sum())
-        unclear_area_pos = float((cell_areas_da * (data_modified_ls[i]  == 4)).sum())
-    
-        PET_area_neg = float((cell_areas_da * (data_modified_ls[i] == 5)).sum())
-        PR_area_neg = float((cell_areas_da * (data_modified_ls[i]  == 6)).sum())
-        PPETR_area_neg = float((cell_areas_da * (data_modified_ls[i]  == 7)).sum())
-        unclear_area_neg = float((cell_areas_da * (data_modified_ls[i]  == 8)).sum())
+        PET_area_pos = float((cell_areas_da * (plot_dt[i] == 1)).sum())
+        PR_area_pos = float((cell_areas_da * (plot_dt[i]  == 2)).sum())
+        PPETR_area_pos = float((cell_areas_da * (plot_dt[i]  == 3)).sum())
+        PET_area_neg = float((cell_areas_da * (plot_dt[i] == 4)).sum())
+        PR_area_neg = float((cell_areas_da * (plot_dt[i]  == 5)).sum())
+        PPETR_area_neg = float((cell_areas_da * (plot_dt[i]  == 6)).sum())
         
-        total_area = PET_area_pos + PR_area_pos + PPETR_area_pos + unclear_area_pos + PET_area_neg + PR_area_neg + PPETR_area_neg + unclear_area_neg
+        total_area = PET_area_pos + PR_area_pos + PPETR_area_pos + PET_area_neg + PR_area_neg + PPETR_area_neg
         
         perc_PET_pos = (PET_area_pos / total_area) * 100
         perc_PR_pos = (PR_area_pos / total_area) * 100
         perc_PPETR_pos = (PPETR_area_pos / total_area) * 100
-        perc_unclear_pos = (unclear_area_pos / total_area) * 100
     
         perc_PET_neg = (PET_area_neg / total_area) * 100
         perc_PR_neg = (PR_area_neg / total_area) * 100
         perc_PPETR_neg = (PPETR_area_neg / total_area) * 100
-        perc_unclear_neg = (unclear_area_neg / total_area) * 100
     
-        values = [perc_PET_pos, perc_PR_pos, perc_PPETR_pos, perc_unclear_pos,
-                  perc_PET_neg, perc_PR_neg, perc_PPETR_neg, perc_unclear_neg]
+        values = [perc_PET_pos, perc_PR_pos, perc_PPETR_pos,
+                  perc_PET_neg, perc_PR_neg, perc_PPETR_neg]
         
         bar_data.append(values)
     
@@ -931,12 +1057,12 @@ for model_name in model_names:
     
     for i, s  in zip([0,1,2,3], ['DJF', 'MAM', 'JJA', 'SON']):
             
-            season_dt = data_modified_ls[s].squeeze()
+            season_dt = plot_dt[s].squeeze()
             ax = axes[i]
            
             season_dt.plot.imshow(ax=ax, cmap=cmap_highest_sim_Pmask, extend='both', 
                                                   cbar_kwargs={'label': 'Highest Similarity'},
-                                                  vmin=1, vmax=8)
+                                                  vmin=1, vmax=6)
             ax.add_feature(ocean)
             ax.coastlines()
             ax.set_title(f'{s}')
@@ -952,7 +1078,7 @@ for model_name in model_names:
             inset_ax.set_xticklabels([])
     
     plt.tight_layout()
-    plt.savefig(plot_path + 'HighSimilarity_Difference_Seasons_Pmask.png', dpi=300)
+    plt.savefig(plot_path + f'{model_name}_HighSimilarity_Ratio_Seasons_Pmask.png', dpi=300)
     plt.show()
     
     
@@ -966,7 +1092,9 @@ for model_name in model_names:
                       'ratio_ETP', 'ratio_RP', 'ratio_PETRP', 'sim_change', 'sim_change_Pmask']]
     sdelta.to_netcdf(data_path + model_name + '_sdelta.nc')
     
-    all_models_sdelta.append(sdelta)
+    #all_models_sdelta.append(sdelta)
+    all_models_sdelta.append({'name': model_name, 'delta': sdelta})
+    
     
     print(f'stored sdelta data for model {model_name}.')
 

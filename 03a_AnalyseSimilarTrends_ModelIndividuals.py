@@ -3,6 +3,8 @@
 Created on Wed May 22 16:49:43 2024
 
 @author: Ruth Stephan
+
+I need to add a check if files are already available..
 """
 
 
@@ -14,9 +16,12 @@ import xarray as xr
 import statsmodels.api as sm
 import matplotlib as mpl
 import cartopy.crs as ccrs
+import cartopy.feature as cfeature
 from matplotlib.colors import ListedColormap
 from tqdm import tqdm
 import seaborn as sns
+import copy
+
 
 
 
@@ -26,13 +31,76 @@ data_path = '/mnt/share/scratch/rs1155/data/CMIP6/output_data/'
 plot_path = '/mnt/share/scratch/rs1155/plots/model_individuals/'
 
 
-# Set a font that supports Unicode characters
+# Set several styles for plotting:
 sns.set_style('ticks')
 plt.rcParams['font.family'] = 'DejaVu Sans'
+ocean = cfeature.NaturalEarthFeature('physical', 'ocean', '110m', edgecolor='face', facecolor='white')
+pal_PRGn = mpl.colormaps.get_cmap('PRGn') 
+pal_PRGn.set_bad(color='lightgray')
+pal_coolwarm = mpl.colormaps.get_cmap('coolwarm') 
+pal_coolwarm.set_bad(color='lightgray')
+pal_coolwarm_r = mpl.colormaps.get_cmap('coolwarm_r') 
+pal_coolwarm_r.set_bad(color='lightgray')
+pal_RdBu = mpl.colormaps.get_cmap('RdBu') 
+pal_RdBu.set_bad(color='lightgray')
+pal_Reds = mpl.colormaps.get_cmap('Reds') 
+pal_Reds.set_bad(color='lightgray')
+pal_Greens = mpl.colormaps.get_cmap('Greens') 
+pal_Greens.set_bad(color='lightgray')
+pal_Purples = mpl.colormaps.get_cmap('Purples') 
+pal_Purples.set_bad(color='lightgray')
+pal_Greens_r = mpl.colormaps.get_cmap('Greens_r') 
+pal_Greens_r.set_bad(color='lightgray')
+pal_Reds_r = mpl.colormaps.get_cmap('Reds_r')  
+pal_Reds_r.set_bad(color='lightgray')
+colors_highest_sim2 = ['forestgreen', 'skyblue', 'darkgoldenrod']
+cmap_highest_sim2 = ListedColormap(colors_highest_sim2)
+cmap_highest_sim2.set_bad('lightgray')
+colors_highest_sim = ['forestgreen', 'skyblue', 'darkgoldenrod', 'black']
+cmap_highest_sim = ListedColormap(colors_highest_sim)
+cmap_highest_sim.set_bad('lightgray')
+colors_highest_sim_Pmask = ['forestgreen', 'steelblue', 'darkgoldenrod', 'black', 'lightgreen', 'skyblue','wheat', 'darkgray'] 
+cmap_highest_sim_Pmask = ListedColormap(colors_highest_sim_Pmask)
+cmap_highest_sim_Pmask.set_bad('lightgray')
+colors_highest_sim_Pmask2 = ['forestgreen', 'steelblue', 'darkgoldenrod', 'lightgreen', 'skyblue','wheat'] 
+cmap_highest_sim_Pmask2 = ListedColormap(colors_highest_sim_Pmask2)
+cmap_highest_sim_Pmask2.set_bad('lightgray')
+
 
 '''
 Functions
 '''
+def calculate_cell_area(lat, lon):
+    """
+    Calculate the area of each cell in a latitude-longitude grid.
+
+    Parameters:
+    - lat: Array of latitudes.
+    - lon: Array of longitudes.
+
+    Returns:
+    - area: Array of areas in square kilometers.
+    """
+    R = 6371.0  # Radius of the Earth in kilometers
+    lat_rad = np.radians(lat)
+    lon_rad = np.radians(lon)
+    
+    #lat_diff = np.abs(np.diff(lat_rad))
+    lon_diff = np.abs(np.diff(lon_rad))
+    
+    # Calculate the area for each cell
+    areas = np.zeros((len(lat), len(lon)))
+    
+    for i in range(len(lat) - 1):
+        for j in range(len(lon) - 1):
+            areas[i, j] = (R ** 2) * np.abs(np.sin(lat_rad[i]) - np.sin(lat_rad[i + 1])) * lon_diff[j]
+    
+    # Handle the last row and column
+    areas[-1, :] = areas[-2, :]
+    areas[:, -1] = areas[:, -2]
+    
+    return areas
+
 
 def calc_vardiff(data, var):
     """
@@ -140,6 +208,12 @@ files_in_directory = os.listdir(data_path)
 combined_files = [file for file in files_in_directory if 'combined' in file]
 model_names = [filename.split('_combined.nc')[0] for filename in combined_files]    
 
+# I need a check for which models trends are already calculated. And the remove them:
+#models_to_remove = ['CAMS-CSM1-0', 'CESM2', 'CESM2-WACCM', 'FGOALS-g3']
+#model_names = model_names[~np.isin(model_names, models_to_remove)]
+
+
+
 all_models_delta = []
 all_models_sdelta = []
     
@@ -147,6 +221,13 @@ model_name = model_names[0]
   
 combined = xr.open_dataset(data_path + model_name + '_combined.nc')
 combined = combined.sel(time=slice('2000', '2100'))
+
+# calculate area for each gricell and store that in a 2nd array:
+latitudes = combined['lat'].values
+longitudes = combined['lon'].values
+cell_areas = calculate_cell_area(latitudes, longitudes)
+cell_areas_da = xr.DataArray(cell_areas, dims=['lat', 'lon'], coords={'lat': latitudes, 'lon': longitudes})
+
 
 trended_ds = combined.copy()
 trended_ds = trended_ds.fillna(np.nan)
@@ -164,59 +245,80 @@ trended_ds['mrso'] = trend_all_cells(combined, 'mrso', start_time='2000', end_ti
 trended_ds['mrro'] = trend_all_cells(combined, 'mrro', start_time='2000', end_time='2100')
 trended_ds['PETR'] = trend_all_cells(combined, 'PETR', start_time='2000', end_time='2100')
 
+trend = trended_ds
+trend.to_netcdf(data_path + model_name + '_trend.nc')
 
 # Plot the original and smoothed data for a specific cell
-combined['mrso'].sel(lat=48, lon=2).sel(time=slice('2050', '2100')).plot(label='Original Data')
-trended_ds['mrso'].sel(lat=48, lon=2).sel(time=slice('2050', '2100')).plot(label='Detrended Data')
+combined['mrso'].sel(time=slice('2050', '2100')).mean(dim=['lat', 'lon']).plot(label='Original Data')
+trend['mrso'].sel(time=slice('2050', '2100')).mean(dim=['lat', 'lon']).plot(label='Detrended Data')
 plt.legend()
 plt.show()
 
-combined['tas'].sel(lat=48, lon=2).sel(time=slice('2050', '2100')).plot(label='Original Data')
-#deseasonalized_ds['tas'].sel(lat=48, lon=2).sel(time=slice('2050', '2100')).plot(label='Deseasonalized Data')
-trended_ds['tas'].sel(lat=48, lon=2).sel(time=slice('2050', '2100')).plot(label='Detrended Data')
-DJF_trended_ds['tas'].sel(lat=48, lon=2).sel(time=slice('2010', '2020')).plot(label='Detrended Data')
-DJF_trended_ds.time
-
+combined['tas'].sel(time=slice('2050', '2100')).mean(dim=['lat', 'lon']).plot(label='Original Data')
+trend['tas'].sel(time=slice('2050', '2100')).mean(dim=['lat', 'lon']).plot(label='Detrended Data')
 plt.legend()
 plt.show()
 
-DJF_trended_ds['tas'] = trend_seasons_all_cells(combined_ds, 'tas', start_time='2000', end_time='2100', season='DJF')
-DJF_trended_ds['pr'] = trend_seasons_all_cells(combined_ds, 'pr', start_time='2000', end_time='2100', season='DJF')
-DJF_trended_ds['evspsbl'] = trend_seasons_all_cells(combined_ds, 'evspsbl', start_time='2000', end_time='2100', season='DJF')
-DJF_trended_ds['mrso'] = trend_seasons_all_cells(combined_ds, 'mrso', start_time='2000', end_time='2100', season='DJF')
-DJF_trended_ds['mrro'] = trend_seasons_all_cells(combined_ds, 'mrro', start_time='2000', end_time='2100', season='DJF')
-DJF_trended_ds['PETR'] = trend_seasons_all_cells(combined_ds, 'PETR', start_time='2000', end_time='2100', season='DJF')
 
-MAM_trended_ds['tas'] = trend_seasons_all_cells(combined_ds, 'tas', start_time='2000', end_time='2100', season='MAM')
-MAM_trended_ds['pr'] = trend_seasons_all_cells(combined_ds, 'pr', start_time='2000', end_time='2100', season='MAM')
-MAM_trended_ds['evspsbl'] = trend_seasons_all_cells(combined_ds, 'evspsbl', start_time='2000', end_time='2100', season='MAM')
-MAM_trended_ds['mrso'] = trend_seasons_all_cells(combined_ds, 'mrso', start_time='2000', end_time='2100', season='MAM')
-MAM_trended_ds['mrro'] = trend_seasons_all_cells(combined_ds, 'mrro', start_time='2000', end_time='2100', season='MAM')
-MAM_trended_ds['PETR'] = trend_seasons_all_cells(combined_ds, 'PETR', start_time='2000', end_time='2100', season='MAM')
+DJF_trended_ds['tas'] = trend_seasons_all_cells(combined, 'tas', start_time='2000', end_time='2100', season='DJF')
+DJF_trended_ds['pr'] = trend_seasons_all_cells(combined, 'pr', start_time='2000', end_time='2100', season='DJF')
+DJF_trended_ds['evspsbl'] = trend_seasons_all_cells(combined, 'evspsbl', start_time='2000', end_time='2100', season='DJF')
+DJF_trended_ds['mrso'] = trend_seasons_all_cells(combined, 'mrso', start_time='2000', end_time='2100', season='DJF')
+DJF_trended_ds['mrro'] = trend_seasons_all_cells(combined, 'mrro', start_time='2000', end_time='2100', season='DJF')
+DJF_trended_ds['PETR'] = trend_seasons_all_cells(combined, 'PETR', start_time='2000', end_time='2100', season='DJF')
 
-JJA_trended_ds['tas'] = trend_seasons_all_cells(combined_ds, 'tas', start_time='2000', end_time='2100', season='JJA')
-JJA_trended_ds['pr'] = trend_seasons_all_cells(combined_ds, 'pr', start_time='2000', end_time='2100', season='JJA')
-JJA_trended_ds['evspsbl'] = trend_seasons_all_cells(combined_ds, 'evspsbl', start_time='2000', end_time='2100', season='JJA')
-JJA_trended_ds['mrso'] = trend_seasons_all_cells(combined_ds, 'mrso', start_time='2000', end_time='2100', season='JJA')
-JJA_trended_ds['mrro'] = trend_seasons_all_cells(combined_ds, 'mrro', start_time='2000', end_time='2100', season='JJA')
-JJA_trended_ds['PETR'] = trend_seasons_all_cells(combined_ds, 'PETR', start_time='2000', end_time='2100', season='JJA')
+MAM_trended_ds['tas'] = trend_seasons_all_cells(combined, 'tas', start_time='2000', end_time='2100', season='MAM')
+MAM_trended_ds['pr'] = trend_seasons_all_cells(combined, 'pr', start_time='2000', end_time='2100', season='MAM')
+MAM_trended_ds['evspsbl'] = trend_seasons_all_cells(combined, 'evspsbl', start_time='2000', end_time='2100', season='MAM')
+MAM_trended_ds['mrso'] = trend_seasons_all_cells(combined, 'mrso', start_time='2000', end_time='2100', season='MAM')
+MAM_trended_ds['mrro'] = trend_seasons_all_cells(combined, 'mrro', start_time='2000', end_time='2100', season='MAM')
+MAM_trended_ds['PETR'] = trend_seasons_all_cells(combined, 'PETR', start_time='2000', end_time='2100', season='MAM')
 
-SON_trended_ds['tas'] = trend_seasons_all_cells(combined_ds, 'tas', start_time='2000', end_time='2100', season='SON')
-SON_trended_ds['pr'] = trend_seasons_all_cells(combined_ds, 'pr', start_time='2000', end_time='2100', season='SON')
-SON_trended_ds['evspsbl'] = trend_seasons_all_cells(combined_ds, 'evspsbl', start_time='2000', end_time='2100', season='SON')
-SON_trended_ds['mrso'] = trend_seasons_all_cells(combined_ds, 'mrso', start_time='2000', end_time='2100', season='SON')
-SON_trended_ds['mrro'] = trend_seasons_all_cells(combined_ds, 'mrro', start_time='2000', end_time='2100', season='SON')
-SON_trended_ds['PETR'] = trend_seasons_all_cells(combined_ds, 'PETR', start_time='2000', end_time='2100', season='SON')
+JJA_trended_ds['tas'] = trend_seasons_all_cells(combined, 'tas', start_time='2000', end_time='2100', season='JJA')
+JJA_trended_ds['pr'] = trend_seasons_all_cells(combined, 'pr', start_time='2000', end_time='2100', season='JJA')
+JJA_trended_ds['evspsbl'] = trend_seasons_all_cells(combined, 'evspsbl', start_time='2000', end_time='2100', season='JJA')
+JJA_trended_ds['mrso'] = trend_seasons_all_cells(combined, 'mrso', start_time='2000', end_time='2100', season='JJA')
+JJA_trended_ds['mrro'] = trend_seasons_all_cells(combined, 'mrro', start_time='2000', end_time='2100', season='JJA')
+JJA_trended_ds['PETR'] = trend_seasons_all_cells(combined, 'PETR', start_time='2000', end_time='2100', season='JJA')
 
-def plot_seasonal_longterm_trend(var, lat, lon):
-    #var = 'tas'
+SON_trended_ds['tas'] = trend_seasons_all_cells(combined, 'tas', start_time='2000', end_time='2100', season='SON')
+SON_trended_ds['pr'] = trend_seasons_all_cells(combined, 'pr', start_time='2000', end_time='2100', season='SON')
+SON_trended_ds['evspsbl'] = trend_seasons_all_cells(combined, 'evspsbl', start_time='2000', end_time='2100', season='SON')
+SON_trended_ds['mrso'] = trend_seasons_all_cells(combined, 'mrso', start_time='2000', end_time='2100', season='SON')
+SON_trended_ds['mrro'] = trend_seasons_all_cells(combined, 'mrro', start_time='2000', end_time='2100', season='SON')
+SON_trended_ds['PETR'] = trend_seasons_all_cells(combined, 'PETR', start_time='2000', end_time='2100', season='SON')
+
+
+def plot_longterm_trend():
     #lat = 48
     #lon = 2
     
-    DJF_dt = DJF_trended_ds[var].sel(lat=lat, lon=lon)
-    MAM_dt = MAM_trended_ds[var].sel(lat=lat, lon=lon)
-    JJA_dt = JJA_trended_ds[var].sel(lat=lat, lon=lon)
-    SON_dt = SON_trended_ds[var].sel(lat=lat, lon=lon)
+    pr_dt = trend['pr'].mean(dim=['lat', 'lon'])
+    evspsbl_dt = trend['evspsbl'].mean(dim=['lat', 'lon'])
+    mrro_dt = trend['mrro'].mean(dim=['lat', 'lon'])
+    PETR_dt = trend['PETR'].mean(dim=['lat', 'lon'])
+    
+    sns.set(style="ticks")
+    plt.rcParams['font.family'] = 'DejaVu Sans'
+    
+    plt.figure(figsize=(12, 8))
+    pr_dt.sel(time=slice('2000', '2100')).plot(label='Precipitation')
+    evspsbl_dt.sel(time=slice('2000', '2100')).plot(label='Evapotranspiration')
+    mrro_dt.sel(time=slice('2000', '2100')).plot(label='Runoff')
+    PETR_dt.sel(time=slice('2000', '2100')).plot(label='Residual')
+    plt.xlabel('Time')
+    plt.title('Mean Trends')
+    plt.legend()
+    plt.savefig(plot_path + 'Trend_AllVars_Yearly.png', dpi=300)
+    plt.show()
+
+def plot_seasonal_longterm_trend(var):
+    #var = 'tas'
+    
+    DJF_dt = DJF_trended_ds[var].mean(dim=['lat', 'lon'])
+    MAM_dt = MAM_trended_ds[var].mean(dim=['lat', 'lon'])
+    JJA_dt = JJA_trended_ds[var].mean(dim=['lat', 'lon'])
+    SON_dt = SON_trended_ds[var].mean(dim=['lat', 'lon'])
     
     # Create numeric time arrays
     numeric_time_DJF = np.arange(DJF_dt.time.size)
@@ -239,59 +341,45 @@ def plot_seasonal_longterm_trend(var, lat, lon):
     # Add labels and title
     plt.xlabel('Time')
     plt.ylabel(f'{var}')
-    plt.title(f'{var} trend at lat={lat}, lon={lon} for Different Seasons')
+    plt.title(f'{var} mean trend for different seasons')
     plt.legend()
-    plt.savefig(f'Plots/Global/{var}_seasonal_trend.png', dpi=300)
+    plt.savefig(plot_path + f'Trend_{var}_Seasons.png', dpi=300)
     plt.show()
 
-def plot_longterm_trend(lat, lon):
-    #lat = 48
-    #lon = 2
-    
-    pr_dt = trended_ds['pr'].sel(lat=lat, lon=lon)
-    evspsbl_dt = trended_ds['evspsbl'].sel(lat=lat, lon=lon)
-    mrro_dt = trended_ds['mrro'].sel(lat=lat, lon=lon)
-    PETR_dt = trended_ds['PETR'].sel(lat=lat, lon=lon)
-    
-    sns.set(style="ticks")
-    plt.rcParams['font.family'] = 'DejaVu Sans'
-    
-    plt.figure(figsize=(12, 8))
-    pr_dt.sel(time=slice('2000', '2100')).plot(label='Precipitation')
-    evspsbl_dt.sel(time=slice('2000', '2100')).plot(label='Evapotranspiration')
-    mrro_dt.sel(time=slice('2000', '2100')).plot(label='Runoff')
-    PETR_dt.sel(time=slice('2000', '2100')).plot(label='Residual')
-    plt.xlabel('Time')
-    plt.title(f'Longterm trends at lat={lat}, lon={lon} for Different Seasons')
-    plt.legend()
-    plt.savefig('Plots/Global/allvars_longterm_trend.png', dpi=300)
-    plt.show()
 
-plot_longterm_trend(lat=48, lon=2)
+plot_longterm_trend()
 
-plot_seasonal_longterm_trend(var='tas', lat=48, lon=2)
-plot_seasonal_longterm_trend(var='pr', lat=48, lon=2)
-plot_seasonal_longterm_trend(var='mrro', lat=48, lon=2)
-plot_seasonal_longterm_trend(var='PETR', lat=48, lon=2)
+plot_seasonal_longterm_trend(var='tas')
+plot_seasonal_longterm_trend(var='pr')
+plot_seasonal_longterm_trend(var='mrro')
+plot_seasonal_longterm_trend(var='PETR')
 
 #save the data:
-trended_ds.to_netcdf(os.path.join(output_path, 'trended_ds.nc'))
-DJF_trended_ds.to_netcdf(os.path.join(output_path, 'DJF_trended_ds.nc'))
-MAM_trended_ds.to_netcdf(os.path.join(output_path, 'MAM_trended_ds.nc'))
-JJA_trended_ds.to_netcdf(os.path.join(output_path, 'JJA_trended_ds.nc'))
-SON_trended_ds.to_netcdf(os.path.join(output_path, 'SON_trended_ds.nc'))
+DJF_trend = DJF_trended_ds    
+MAM_trend = MAM_trended_ds    
+JJA_trend = JJA_trended_ds    
+SON_trend = SON_trended_ds    
+    
+DJF_trend.to_netcdf(data_path + model_name + '_DJF_trend.nc')
+MAM_trend.to_netcdf(data_path + model_name + '_MAM_trend.nc')
+JJA_trend.to_netcdf(data_path + model_name + '_JJA_trend.nc')
+SON_trend.to_netcdf(data_path + model_name + '_SON_trend.nc')
 
+
+
+
+##################################################################
+##    Calculate Correlations for those longterm-trends:         ##
+##################################################################
 
 # load the data:
-trended_ds = xr.open_dataset(os.path.join(data_path + 'trended_ds.nc'))
-DJF_trended_ds = xr.open_dataset(os.path.join(data_path + 'DJF_trended_ds.nc'))
-MAM_trended_ds = xr.open_dataset(os.path.join(data_path + 'MAM_trended_ds.nc'))
-JJA_trended_ds = xr.open_dataset(os.path.join(data_path + 'JJA_trended_ds.nc'))
-SON_trended_ds = xr.open_dataset(os.path.join(data_path + 'SON_trended_ds.nc'))
+trend = xr.open_dataset(data_path + model_name + '_trend.nc')
+DJF_trend = xr.open_dataset(data_path + model_name + '_DJF_trend.nc')
+MAM_trend = xr.open_dataset(data_path + model_name + '_MAM_trend.nc')
+JJA_trend = xr.open_dataset(data_path + model_name + '_JJA_trend.nc')
+SON_trend = xr.open_dataset(data_path + model_name + '_SON_trend.nc')
 
 
-
-### Calculate Correlations for those longterm-trends: 
 def corr_func_single_cell(var1: np.ndarray, var2: np.ndarray) -> np.float64:
     # Remove NaN values from both arrays
     valid_mask = ~np.isnan(var1) & ~np.isnan(var2)
@@ -326,24 +414,22 @@ def corr_all_cells(data, var1, var2
         vectorize=True,
         )
     
-    cmap = mpl.colormaps.get_cmap('RdBu')
-    cmap.set_bad(color='lightgray')
-
     fig, axes = plt.subplots(nrows=1, ncols=1, figsize=(6, 3),
                              subplot_kw={'projection': ccrs.PlateCarree()})
-    corr_results.plot.imshow(ax=axes, cmap=cmap, extend='both',
+    corr_results.plot.imshow(ax=axes, cmap=pal_RdBu, extend='both',
                                   center=0, vmin=-1, vmax=1,
                                   cbar_kwargs={'label': 'Pearson Correlation', 'shrink' : 0.9})
+    axes.add_feature(ocean)
     axes.coastlines()
     axes.set_title(f'Correlation between {var1} and {var2}')
     plt.tight_layout()
-    plt.savefig(f'Plots/Global/Corr_{var1}_{var2}.png', dpi=300, transparent=True)
+    plt.savefig(plot_path + f'Corr_{var1}_{var2}.png', dpi=300, transparent=True)
     plt.show()
     
     return corr_results
 
 
-def find_high_index(arr1, arr2, arr3):
+def find_high_index(arr1, arr2, arr3, threshold = 0.05):
     # Mask NaN values in all arrays
     mask_arr1 = np.isnan(arr1)
     mask_arr2 = np.isnan(arr2)
@@ -363,6 +449,19 @@ def find_high_index(arr1, arr2, arr3):
                                   np.where(max_arr == abs(arr2_masked), 2, 3)), 
                          np.nan).astype(float)
     
+    ''' Do that with the model agreement
+    #Analyse whether the highest correlation too close to the 2nd highest correlation:
+    # 1. get the second closest to 1:
+    second_arr = np.where(abs(arr1_masked) == max_arr, np.maximum(abs(arr2_masked), abs(arr3_masked)),
+                           np.where(abs(arr2_masked) == max_arr, np.maximum(abs(arr1_masked), abs(arr3_masked)), np.maximum(abs(arr1_masked), abs(arr2_masked))))
+    # 2. get the difference between the 1st and 2nd closest and the calculate the ratio of the difference and the 1st closest
+    ratio = np.abs(max_arr - abs(second_arr)) / np.abs(max_arr)
+    
+    # 3. When this ratio is lower than 50 %, meaning that the 2nd closest to 1 needs to at least deviate with 50 % from the first --> unclear result:
+    unclear = ratio < threshold
+    index_arr[unclear] = 4
+    '''
+    
     # Set NaN values back to NaN
     index_arr[mask_arr1] = np.nan
     index_arr[mask_arr2] = np.nan
@@ -378,25 +477,26 @@ def high_corr_allcells(data, var1, var2, var3, save_string):
         *input_vars,
         input_core_dims=[['lat', 'lon'], ['lat', 'lon'], ['lat', 'lon']],
         output_core_dims=[['lat', 'lon']],
-        dask='parallelized',
         output_dtypes=[float]
     )
     
     # Prepare barplot inset:
     colors = ['forestgreen', 'skyblue', 'darkgoldenrod']    
 
-    PET_cells = np.sum(highest_corr== 1)
-    PR_cells = np.sum(highest_corr== 2)
-    PSM_cells = np.sum(highest_corr== 3)
+    PET_area = float((cell_areas_da * (highest_corr == 1)).sum())
+    PR_area = float((cell_areas_da * (highest_corr == 2)).sum())
+    PPETR_area = float((cell_areas_da * (highest_corr == 3)).sum())
+    unclear_area = float((cell_areas_da * (highest_corr == 4)).sum())
 
-    total_cells = PET_cells + PSM_cells +PR_cells
+    total_area = PET_area + PR_area + PPETR_area + unclear_area
 
-    perc_PET = (PET_cells / total_cells) * 100
-    perc_SM = (PSM_cells / total_cells) * 100
-    perc_PR = (PR_cells / total_cells) * 100
+    perc_PET = (PET_area / total_area) * 100
+    perc_SM = (PR_area / total_area) * 100
+    perc_PR = (PPETR_area / total_area) * 100
+    perc_unclear = (PPETR_area / total_area) * 100
 
-    categories = ['Cor(P,ET)', 'Cor(P,R)', 'Cor(P,SM)']
-    values = [perc_PET, perc_PR, perc_SM]
+    categories = ['Cor(P,ET)', 'Cor(P,R)', 'Cor(P,SM)', 'unclear']
+    values = [perc_PET, perc_PR, perc_SM, perc_unclear]
         
     cmap = ListedColormap(colors)
     cmap.set_bad('lightgray')
@@ -408,32 +508,31 @@ def high_corr_allcells(data, var1, var2, var3, save_string):
         
     fig, axes = plt.subplots(nrows=1, ncols=1, figsize=(7, 3), subplot_kw={'projection': ccrs.PlateCarree()})        
 
-    highest_corr.plot.imshow(ax=axes, cmap=cmap, extend='both', cbar_kwargs={'label': 'Highest Correlation'})
+    highest_corr.plot.imshow(ax=axes, cmap=cmap_highest_sim, extend='both', cbar_kwargs={'label': 'Highest Correlation'})
+    axes.add_feature(ocean)
     axes.coastlines()
 
     # Create an inset for the bar plot
     left, bottom, width, height = 0.1, 0.15, 0.10, 0.19
     ax_inset = fig.add_axes([left, bottom, width, height], facecolor='white')
-    
-    # Plot the bar plot
-    ax_inset.bar(categories, values, color=colors, edgecolor='black')
+    ax_inset.bar(categories, values, color=colors_highest_sim, edgecolor='black')
     ax_inset.set_xlabel('')
     ax_inset.set_title('No. of cells [%]')
-    
-    # Hide xticks and xtick labels
     ax_inset.set_yticks([0, 20, 40, 60])
     ax_inset.set_xticks([])
     ax_inset.set_xticklabels([])
     
     plt.tight_layout()
-    plt.savefig(f'Plots/Global/High_Corr_{save_string}.png', dpi=300)
+    plt.savefig(plot_path + f'High_Corr_{save_string}.png', dpi=300)
     plt.show()
     
     return highest_corr
 
-corr_PET = corr_all_cells(data=trended_ds, var1='pr', var2='evspsbl')
-corr_PR = corr_all_cells(data=trended_ds, var1='pr', var2='mrro')
-corr_PPETR = corr_all_cells(data=trended_ds, var1='pr', var2='PETR')
+
+
+corr_PET = corr_all_cells(data=trend, var1='pr', var2='evspsbl')
+corr_PR = corr_all_cells(data=trend, var1='pr', var2='mrro')
+corr_PPETR = corr_all_cells(data=trend, var1='pr', var2='PETR')
 
 # Create a new xarray.Dataset
 corr_ds = xr.Dataset({
@@ -442,33 +541,33 @@ corr_ds = xr.Dataset({
     'corr_PPETR': corr_PPETR 
 })
 
-highest_corr = high_corr_allcells(corr_ds, 'corr_PET', 'corr_PR', 'corr_PPETR', save_string='yearly')
+highest_corr = high_corr_allcells(corr_ds, 'corr_PET', 'corr_PR', 'corr_PPETR', save_string='Yearly')
 np.unique(highest_corr)
-highest_corr.sel(lat=48, lon=2)
-corr_PET.sel(lat=48, lon=2)
-corr_PR.sel(lat=48, lon=2)
-corr_PPETR.sel(lat=48, lon=2)
+highest_corr.mean(dim=['lat', 'lon'])
+corr_PET.mean(dim=['lat', 'lon'])
+corr_PR.mean(dim=['lat', 'lon'])
+corr_PPETR.mean(dim=['lat', 'lon'])
 
 fig, axs = plt.subplots(3, 1, figsize=(8, 12))  # 3 rows, 1 column
 
-Cor_PET = np.corrcoef(trended_ds['pr'].sel(lat=48, lon=2), trended_ds['evspsbl'].sel(lat=48, lon=2))[0, 1]
-axs[0].scatter(trended_ds['pr'].sel(lat=48, lon=2), trended_ds['evspsbl'].sel(lat=48, lon=2), color='lightblue')
+Cor_PET = np.corrcoef(trended_ds['pr'].mean(dim=['lat', 'lon']), trended_ds['evspsbl'].mean(dim=['lat', 'lon']))[0, 1]
+axs[0].scatter(trended_ds['pr'].mean(dim=['lat', 'lon']), trended_ds['evspsbl'].mean(dim=['lat', 'lon']), color='lightblue')
 axs[0].set_title(f'Correlation: {Cor_PET:.2f}')
 axs[0].set_xlabel('pr')
 axs[0].set_ylabel('evspsbl')
 axs[0].grid(True)
 axs[0].legend()
 
-Cor_PR = np.corrcoef(trended_ds['pr'].sel(lat=48, lon=2), trended_ds['mrro'].sel(lat=48, lon=2))[0, 1]
-axs[1].scatter(trended_ds['pr'].sel(lat=48, lon=2), trended_ds['mrro'].sel(lat=48, lon=2), color='purple')
+Cor_PR = np.corrcoef(trended_ds['pr'].mean(dim=['lat', 'lon']), trended_ds['mrro'].mean(dim=['lat', 'lon']))[0, 1]
+axs[1].scatter(trended_ds['pr'].mean(dim=['lat', 'lon']), trended_ds['mrro'].mean(dim=['lat', 'lon']), color='purple')
 axs[1].set_title(f'Correlation: {Cor_PR:.2f}')
 axs[1].set_xlabel('pr')
 axs[1].set_ylabel('mrro')
 axs[1].grid(True)
 axs[1].legend()
 
-Cor_PPETR = np.corrcoef(trended_ds['pr'].sel(lat=48, lon=2), trended_ds['PETR'].sel(lat=48, lon=2))[0, 1]
-axs[2].scatter(trended_ds['pr'].sel(lat=48, lon=2), trended_ds['PETR'].sel(lat=48, lon=2), color='brown')
+Cor_PPETR = np.corrcoef(trended_ds['pr'].mean(dim=['lat', 'lon']), trended_ds['PETR'].mean(dim=['lat', 'lon']))[0, 1]
+axs[2].scatter(trended_ds['pr'].mean(dim=['lat', 'lon']), trended_ds['PETR'].mean(dim=['lat', 'lon']), color='brown')
 axs[2].set_title(f'Correlation: {Cor_PPETR:.2f}')
 axs[2].set_xlabel('pr')
 axs[2].set_ylabel('PETR')
@@ -480,7 +579,7 @@ plt.show()
 
 
 ### analyse in addition if the Precipitation will increase or decrease:
-delta_ds = combined_ds.copy()   
+delta_ds = combined.copy()   
 
 
 ## Calculate Difference between 2100 and 2025
@@ -495,72 +594,64 @@ delta_ds['d_pr'] = delta_ds['d_pr'].where(change_greater)
 m_neg = delta_ds['d_pr'] < 0
 
 np.unique(highest_corr)
-data_modified = highest_corr.where(~m_neg, highest_corr+3)
+data_modified = highest_corr.where(~m_neg, highest_corr+4)
 np.unique(data_modified)
-highest_corr.sel(lat=48, lon=2)
-data_modified.sel(lat=48, lon=2)
-delta_ds['d_pr'].sel(lat=48, lon=2)
 
 
 #Barplot global:
-PET_cells_pos = np.sum(data_modified == 1)
-PR_cells_pos = np.sum(data_modified == 2)
-PPETR_cells_pos = np.sum(data_modified ==3)
+PET_area_pos = float((cell_areas_da * (data_modified == 1)).sum())
+PR_area_pos = float((cell_areas_da * (data_modified == 2)).sum())
+PPETR_area_pos = float((cell_areas_da * (data_modified == 3)).sum())
+unclear_area_pos = float((cell_areas_da * (data_modified == 4)).sum())
 
-PET_cells_neg = np.sum(data_modified == 4)
-PR_cells_neg = np.sum(data_modified == 5)
-PPETR_cells_neg = np.sum(data_modified ==6)
+PET_area_neg = float((cell_areas_da * (data_modified == 5)).sum())
+PR_area_neg = float((cell_areas_da * (data_modified == 6)).sum())
+PPETR_area_neg = float((cell_areas_da * (data_modified == 7)).sum())
+unclear_area_neg = float((cell_areas_da * (data_modified == 8)).sum())
 
-total_cells = PET_cells_pos + PPETR_cells_pos + PR_cells_pos + PET_cells_neg + PPETR_cells_neg + PR_cells_neg
+# Total area
+total_area = PET_area_pos + PR_area_pos + PPETR_area_pos + unclear_area_pos + PET_area_neg + PR_area_neg + PPETR_area_neg + unclear_area_neg
 
-perc_PET_pos = (PET_cells_pos / total_cells) * 100
-perc_PPETR_pos = (PPETR_cells_pos / total_cells) * 100
-perc_PR_pos = (PR_cells_pos / total_cells) * 100
+perc_PET_pos = (PET_area_pos / total_area) * 100
+perc_PR_pos = (PR_area_pos / total_area) * 100
+perc_PPETR_pos = (PPETR_area_pos / total_area) * 100
+perc_unclear_pos = (unclear_area_pos / total_area) * 100
 
-perc_PET_neg = (PET_cells_neg / total_cells) * 100
-perc_PPETR_neg = (PPETR_cells_neg / total_cells) * 100
-perc_PR_neg = (PR_cells_neg / total_cells) * 100
-
-
-categories = ['$\Delta$ET-$\Delta$P pos', '$\Delta$R-$\Delta$P pos', '$\Delta$(P-ET-R)-$\Delta$P pos', 
-              '$\Delta$ET-$\Delta$P neg', '$\Delta$R-$\Delta$P neg', '$\$\Delta$(P-ET-R)-$\Delta$P neg']
-values = [perc_PET_pos, perc_PR_pos, perc_PPETR_pos, 
-          perc_PET_neg, perc_PR_neg, perc_PPETR_neg]
+perc_PET_neg = (PET_area_neg / total_area) * 100
+perc_PR_neg = (PR_area_neg / total_area) * 100
+perc_PPETR_neg = (PPETR_area_neg / total_area) * 100
+perc_unclear_neg = (unclear_area_neg / total_area) * 100
 
 
-colors = ['forestgreen', 'steelblue', 'darkgoldenrod', 'lightgreen', 'skyblue','wheat'] 
+categories = ['Cor(P,ET) pos', 'Cor(P,R) pos', 'Cor(P,SM) pos', 'unclear pos',
+              'Cor(P,ET) neg', 'Cor(P,R) neg', 'Cor(P,SM) neg', 'unclear neg']
+
+values = [perc_PET_pos, perc_PR_pos, perc_PPETR_pos, perc_unclear_pos,
+          perc_PET_neg, perc_PR_neg, perc_PPETR_neg, perc_unclear_neg]
+
 
 ## Plot:
-cmap = ListedColormap(colors)
-cmap.set_bad('lightgray')
-
 fig, axes = plt.subplots(nrows=1, ncols=1, figsize=(7, 3), subplot_kw={'projection': ccrs.PlateCarree()})        
 
-# Plot the main map
-data_modified.plot.imshow(ax=axes, cmap=cmap,  extend='both', 
-                                      cbar_kwargs={'label': 'Highest Change'}, 
-                                      vmin=1, vmax=6)
+data_modified.plot.imshow(ax=axes, cmap=cmap_highest_sim_Pmask,  extend='both', 
+                                      cbar_kwargs={'label': 'Highest Similarity'}, 
+                                      vmin=1, vmax=8)
+axes.add_feature(ocean)
 axes.coastlines()
-axes.set_title('Similar Change, Annual Mean')
-
-
+axes.set_title('Highest Similarity - Yearly')
 
 # Create an inset for the bar plot
-left, bottom, width, height = 0.13, 0.1, 0.14, 0.19
+left, bottom, width, height = 0.11, 0.16, 0.14, 0.19
 ax_inset = fig.add_axes([left, bottom, width, height], facecolor='white')
-
-# Plot the bar plot
-ax_inset.bar(categories, values, color=colors, edgecolor='black')
+ax_inset.bar(categories, values, color=colors_highest_sim_Pmask, edgecolor='black')
 ax_inset.set_xlabel('')
-ax_inset.set_title('No. of cells [%]')
-
-# Hide xticks and xtick labels
+ax_inset.set_title('Area [%]')
 ax_inset.set_yticks([0, 10, 20, 30, 40])
 ax_inset.set_xticks([])
 ax_inset.set_xticklabels([])
 
 plt.tight_layout()
-plt.savefig('Plots/Global/High_Correlation_Yearly_Pmask.png', dpi=300)
+plt.savefig(plot_path + 'High_Correlation_Pmask_Yearly.png', dpi=300)
 plt.show()
 
 
@@ -569,9 +660,9 @@ plt.show()
 
 ###################### seasons:
 
-DJF_corr_PET = corr_all_cells(data=DJF_trended_ds, var1='pr', var2='evspsbl')
-DJF_corr_PR = corr_all_cells(data=DJF_trended_ds, var1='pr', var2='mrro')
-DJF_corr_PPETR = corr_all_cells(data=DJF_trended_ds, var1='pr', var2='PETR')
+DJF_corr_PET = corr_all_cells(data=DJF_trend, var1='pr', var2='evspsbl')
+DJF_corr_PR = corr_all_cells(data=DJF_trend, var1='pr', var2='mrro')
+DJF_corr_PPETR = corr_all_cells(data=DJF_trend, var1='pr', var2='PETR')
 
 DJF_corr_ds = xr.Dataset({
     'DJF_corr_PET': DJF_corr_PET,
@@ -582,9 +673,9 @@ DJF_corr_ds = xr.Dataset({
 DJF_highest_corr = high_corr_allcells(DJF_corr_ds, 'DJF_corr_PET', 'DJF_corr_PR', 'DJF_corr_PPETR', save_string='yearly')
 
 
-MAM_corr_PET = corr_all_cells(data=MAM_trended_ds, var1='pr', var2='evspsbl')
-MAM_corr_PR = corr_all_cells(data=MAM_trended_ds, var1='pr', var2='mrro')
-MAM_corr_PPETR = corr_all_cells(data=MAM_trended_ds, var1='pr', var2='PETR')
+MAM_corr_PET = corr_all_cells(data=MAM_trend, var1='pr', var2='evspsbl')
+MAM_corr_PR = corr_all_cells(data=MAM_trend, var1='pr', var2='mrro')
+MAM_corr_PPETR = corr_all_cells(data=MAM_trend, var1='pr', var2='PETR')
 
 MAM_corr_ds = xr.Dataset({
     'MAM_corr_PET': MAM_corr_PET,
@@ -594,9 +685,9 @@ MAM_corr_ds = xr.Dataset({
 
 MAM_highest_corr = high_corr_allcells(MAM_corr_ds, 'MAM_corr_PET', 'MAM_corr_PR', 'MAM_corr_PPETR', save_string='yearly')
 
-JJA_corr_PET = corr_all_cells(data=JJA_trended_ds, var1='pr', var2='evspsbl')
-JJA_corr_PR = corr_all_cells(data=JJA_trended_ds, var1='pr', var2='mrro')
-JJA_corr_PPETR = corr_all_cells(data=JJA_trended_ds, var1='pr', var2='PETR')
+JJA_corr_PET = corr_all_cells(data=JJA_trend, var1='pr', var2='evspsbl')
+JJA_corr_PR = corr_all_cells(data=JJA_trend, var1='pr', var2='mrro')
+JJA_corr_PPETR = corr_all_cells(data=JJA_trend, var1='pr', var2='PETR')
 
 JJA_corr_ds = xr.Dataset({
     'JJA_corr_PET': JJA_corr_PET,
@@ -606,9 +697,9 @@ JJA_corr_ds = xr.Dataset({
 
 JJA_highest_corr = high_corr_allcells(JJA_corr_ds, 'JJA_corr_PET', 'JJA_corr_PR', 'JJA_corr_PPETR', save_string='yearly')
 
-SON_corr_PET = corr_all_cells(data=SON_trended_ds, var1='pr', var2='evspsbl')
-SON_corr_PR = corr_all_cells(data=SON_trended_ds, var1='pr', var2='mrro')
-SON_corr_PPETR = corr_all_cells(data=SON_trended_ds, var1='pr', var2='PETR')
+SON_corr_PET = corr_all_cells(data=SON_trend, var1='pr', var2='evspsbl')
+SON_corr_PR = corr_all_cells(data=SON_trend, var1='pr', var2='mrro')
+SON_corr_PPETR = corr_all_cells(data=SON_trend, var1='pr', var2='PETR')
 
 SON_corr_ds = xr.Dataset({
     'SON_corr_PET': SON_corr_PET,
@@ -628,26 +719,25 @@ seasons = ['DJF', 'MAM', 'JJA', 'SON']
 
 bar_data = []
 for i in seasons:
-    PET_cells = np.sum(high_cor_seasons[i] == 1)
-    PR_cells = np.sum(high_cor_seasons[i] == 2)
-    PPETR_cells = np.sum(high_cor_seasons[i] == 3)
+    PET_area = float((cell_areas_da * (high_cor_seasons[i] == 1)).sum())
+    PR_area = float((cell_areas_da * (high_cor_seasons[i]  == 2)).sum())
+    PPETR_area = float((cell_areas_da * (high_cor_seasons[i]  == 3)).sum())
+    unclear_area = float((cell_areas_da * (high_cor_seasons[i]  == 4)).sum())
     
-    total_cells = PET_cells + PPETR_cells +PR_cells
+    total_area = PET_area + PR_area + PPETR_area + unclear_area
     
-    perc_PET = (PET_cells / total_cells) * 100
-    perc_PPETR = (PPETR_cells / total_cells) * 100
-    perc_PR = (PR_cells / total_cells) * 100
+    perc_PET = (PET_area / total_area) * 100
+    perc_PR = (PR_area / total_area) * 100
+    perc_PPETR = (PPETR_area / total_area) * 100
+    perc_unclear = (unclear_area / total_area) * 100
     
-    values = [perc_PET.item(), perc_PR.item(), perc_PPETR.item()]
+    values = [perc_PET, perc_PR, perc_PPETR, perc_unclear]
     
     bar_data.append(values)
 
 x_values = np.arange(len(bar_data[0]))
 
 
-colors = ['forestgreen', 'skyblue', 'darkgoldenrod']        
-cmap = ListedColormap(colors)
-cmap.set_bad('lightgray')
     
 fig, axes = plt.subplots(nrows=len(seasons), ncols=1, figsize=(7, 12), subplot_kw={'projection': ccrs.PlateCarree()})
 
@@ -655,35 +745,31 @@ for i, s  in zip([0,1,2,3], ['DJF', 'MAM', 'JJA', 'SON']):
         
         ax = axes[i]
        
-        high_cor_seasons[s].plot.imshow(ax=ax, cmap=cmap, extend='both', 
+        high_cor_seasons[s].plot.imshow(ax=ax, cmap=cmap_highest_sim, extend='both', 
                                               cbar_kwargs={'label': 'Highest Correlation'}, 
-                                              vmin=1, vmax=3)
+                                              vmin=1, vmax=4)
+        ax.add_feature(ocean)
         ax.coastlines()
         ax.set_title(f'{s}')
         
         # Create an inset for the bar plot
         left, bottom, width, height = 0.10, 0.12, 0.12, 0.22
         inset_ax = ax.inset_axes([left, bottom, width, height], facecolor='white')
-        
-        # Plot the bar plot
-        inset_ax.bar(x_values, bar_data[i], color=colors, edgecolor='black')
-        
+        inset_ax.bar(x_values, bar_data[i], color=colors_highest_sim, edgecolor='black')
         inset_ax.set_xlabel('')
-        inset_ax.set_title('No. of cells [%]')
-        
-        # Hide xticks and xtick labels
+        inset_ax.set_title('Area [%]')
         inset_ax.set_yticks([0, 25, 50, 75])
         inset_ax.set_xticks([])
         inset_ax.set_xticklabels([])
 
 
 plt.tight_layout()
-plt.savefig('Plots/Global/High_Correlation_Seasons.png', dpi=300)
+plt.savefig(plot_path + 'High_Correlation_Seasons.png', dpi=300)
 plt.show()
 
 
 ### analyse in addition if the Precipitation will increase or decrease:
-sdelta_ds = combined_ds.copy() 
+sdelta_ds = combined.copy() 
 
 
 ## Calculate Difference between 2100 and 2025
@@ -697,76 +783,74 @@ sdelta_ds['d_pr'] = sdelta_ds['d_pr'].where(s_change_greater)
     
 s_neg = sdelta_ds['d_pr'] < 0
 
-data_modified_ls = high_cor_seasons
-for i in seasons:
-    print(np.unique(high_cor_seasons[i]))
-    data_modified_ls[i] = high_cor_seasons[i].where(~s_neg.sel(season=i), high_cor_seasons[i]+3)
-    print(np.unique(data_modified_ls[i]))
+data_modified_ls = copy.deepcopy(high_cor_seasons)
+
+for season in seasons:
+    print(f"Unique values in original {season}: {np.unique(high_cor_seasons[season])}")
+    data_modified_ls[season] = high_cor_seasons[season].where(~s_neg.sel(season=season), high_cor_seasons[season] + 4)
+    print(f"Unique values in modified {season}: {np.unique(data_modified_ls[season])}")
+
 
 #Get barplot data:
 bar_data = []
 for i in seasons:
-    PET_cells_pos = np.sum(high_cor_seasons[i] == 1)
-    PR_cells_pos = np.sum(high_cor_seasons[i] == 2)
-    PPETR_cells_pos = np.sum(high_cor_seasons[i] == 3)
+    PET_area_pos = float((cell_areas_da * (data_modified_ls[i] == 1)).sum())
+    PR_area_pos = float((cell_areas_da * (data_modified_ls[i]  == 2)).sum())
+    PPETR_area_pos = float((cell_areas_da * (data_modified_ls[i]  == 3)).sum())
+    unclear_area_pos = float((cell_areas_da * (data_modified_ls[i]  == 4)).sum())
 
-    PET_cells_neg = np.sum(high_cor_seasons[i] == 4)
-    PR_cells_neg = np.sum(high_cor_seasons[i] == 5)
-    PPETR_cells_neg = np.sum(high_cor_seasons[i] == 6)
+    PET_area_neg = float((cell_areas_da * (data_modified_ls[i] == 5)).sum())
+    PR_area_neg = float((cell_areas_da * (data_modified_ls[i]  == 6)).sum())
+    PPETR_area_neg = float((cell_areas_da * (data_modified_ls[i]  == 7)).sum())
+    unclear_area_neg = float((cell_areas_da * (data_modified_ls[i]  == 8)).sum())
     
-    total_cells = PET_cells_pos + PPETR_cells_pos + PR_cells_pos + PET_cells_neg + PPETR_cells_neg + PR_cells_neg
-    perc_PET_pos = (PET_cells_pos / total_cells) * 100
-    perc_PPETR_pos = (PPETR_cells_pos / total_cells) * 100
-    perc_PR_pos = (PR_cells_pos / total_cells) * 100
-
-    perc_PET_neg = (PET_cells_neg / total_cells) * 100
-    perc_PPETR_neg = (PPETR_cells_neg / total_cells) * 100
-    perc_PR_neg = (PR_cells_neg / total_cells) * 100
-
+    total_area = PET_area_pos + PR_area_pos + PPETR_area_pos + unclear_area_pos + PET_area_neg + PR_area_neg + PPETR_area_neg + unclear_area_neg
     
-    values = [perc_PET_pos.item(), perc_PR_pos.item(), perc_PPETR_pos.item(), 
-              perc_PET_neg.item(), perc_PR_neg.item(), perc_PPETR_neg.item()]
+    perc_PET_pos = (PET_area_pos / total_area) * 100
+    perc_PR_pos = (PR_area_pos / total_area) * 100
+    perc_PPETR_pos = (PPETR_area_pos / total_area) * 100
+    perc_unclear_pos = (unclear_area_pos / total_area) * 100
+
+    perc_PET_neg = (PET_area_neg / total_area) * 100
+    perc_PR_neg = (PR_area_neg / total_area) * 100
+    perc_PPETR_neg = (PPETR_area_neg / total_area) * 100
+    perc_unclear_neg = (unclear_area_neg / total_area) * 100
+
+    values = [perc_PET_pos, perc_PR_pos, perc_PPETR_pos, perc_unclear_pos,
+              perc_PET_neg, perc_PR_neg, perc_PPETR_neg, perc_unclear_neg]
     
     bar_data.append(values)
 
 x_values = np.arange(len(bar_data[0]))
 
-colors = ['forestgreen', 'steelblue', 'darkgoldenrod', 'lightgreen', 'skyblue','wheat'] 
-cmap = ListedColormap(colors)
-cmap.set_bad('lightgray')
 
 
 fig, axes = plt.subplots(nrows=len(seasons), ncols=1, figsize=(7, 12), subplot_kw={'projection': ccrs.PlateCarree()})
 
-for i, s  in zip([0,1,2,3],
-                      ['DJF', 'MAM', 'JJA', 'SON']):
+for i, s  in zip([0,1,2,3], ['DJF', 'MAM', 'JJA', 'SON']):
         
     
         ax = axes[i]
-       
-        high_cor_seasons[s].plot.imshow(ax=ax, cmap=cmap, extend='both', 
+        high_cor_seasons[s].plot.imshow(ax=ax, cmap=cmap_highest_sim_Pmask, extend='both', 
                                               cbar_kwargs={'label': 'Highest Similarity'},
-                                              vmin=1, vmax=6)
+                                              vmin=1, vmax=8)
+        ax.add_feature(ocean)
         ax.coastlines()
         ax.set_title(f'{s}')
         
         # Create an inset for the bar plot
         left, bottom, width, height = 0.10, 0.12, 0.12, 0.24
         inset_ax = ax.inset_axes([left, bottom, width, height], facecolor='white')
-        
-        # Plot the bar plot
-        inset_ax.bar(x_values, bar_data[i], color=colors, edgecolor='black')
+        inset_ax.bar(x_values, bar_data[i], color=colors_highest_sim_Pmask, edgecolor='black')
         inset_ax.set_xlabel('')
-        inset_ax.set_title('No. of cells [%]')
-        
-        # Hide xticks and xtick labels
+        inset_ax.set_title('Area [%]')
         inset_ax.set_yticks([0, 10, 20, 30, 40])
         inset_ax.set_xticks([])
         inset_ax.set_xticklabels([])
 
 
 plt.tight_layout()
-plt.savefig('Plots/Global/High_Correlation_Seasons_Pmask.png', dpi=300)
+plt.savefig(plot_path + 'High_Correlation_Pmask_Seasons.png', dpi=300)
 plt.show()
 
 
@@ -777,7 +861,7 @@ plt.show()
 
 
 
-
+''' old version with loop
 
 def corr_func(data, var1, var2, time_start, time_end, save_string):
     import cartopy.crs as ccrs
@@ -846,3 +930,4 @@ Cor_PR_loop.sel(lat=48, lon=2)
 Cor_PPETR_loop.sel(lat=48, lon=2)
 
 Cor_PET_loop.sel(lat=48, lon=2)
+'''
